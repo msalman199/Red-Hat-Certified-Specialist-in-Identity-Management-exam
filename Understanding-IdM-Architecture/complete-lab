@@ -1,0 +1,310 @@
+Lab 2: Understanding IdM Architecture
+Objectives
+By the end of this lab, students will be able to:
+
+Understand the core components of Identity Management (IdM) architecture including LDAP, Kerberos, DNS, and PKI
+Explore how these components work together to provide centralized authentication and authorization
+Use ipa commands to interact with each IdM service component
+Configure and manage basic IdM services through command-line tools
+Analyze the relationships between different IdM components in a real-world scenario
+Prerequisites
+Before starting this lab, students should have:
+
+Basic understanding of Linux command-line operations
+Familiarity with network concepts (DNS, LDAP basics)
+Knowledge of authentication concepts (usernames, passwords, certificates)
+Understanding of client-server architecture
+Basic familiarity with Red Hat Enterprise Linux or CentOS/Rocky Linux
+Lab Environment Setup
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines with IdM already installed. Simply click Start Lab to access your environment - no need to build your own VM or install software.
+
+Your lab environment includes:
+
+Red Hat Enterprise Linux 9 or Rocky Linux 9
+FreeIPA server pre-installed and configured
+Administrative access to explore IdM components
+Network connectivity for testing services
+Task 1: Explore the Architecture of IdM Components
+Subtask 1.1: Understanding IdM Architecture Overview
+Identity Management (IdM) is built on four core components that work together to provide comprehensive identity services:
+
+LDAP (Lightweight Directory Access Protocol): Stores user and group information
+Kerberos: Provides secure authentication services
+DNS (Domain Name System): Enables service discovery and name resolution
+PKI (Public Key Infrastructure): Manages digital certificates and encryption
+Let's start by examining the overall IdM installation and its components.
+
+# Check IdM server status
+sudo systemctl status ipa
+
+# View IdM server information
+ipa config-show
+Subtask 1.2: Examining LDAP Component
+LDAP serves as the central directory store for all identity information in IdM.
+
+# Check LDAP service status
+sudo systemctl status dirsrv@YOUR-REALM-NAME
+
+# View LDAP directory structure
+ipa config-show | grep "IPA masters"
+
+# Explore LDAP base DN (Distinguished Name)
+ldapsearch -x -H ldap://localhost -b "dc=example,dc=com" -s base
+Note: Replace YOUR-REALM-NAME with your actual realm name, and dc=example,dc=com with your actual base DN.
+
+Subtask 1.3: Examining Kerberos Component
+Kerberos provides secure authentication through tickets and encryption.
+
+# Check Kerberos KDC (Key Distribution Center) status
+sudo systemctl status krb5kdc
+
+# View Kerberos configuration
+cat /etc/krb5.conf
+
+# Check Kerberos database
+sudo kadmin.local -q "listprincs"
+Subtask 1.4: Examining DNS Component
+DNS in IdM provides service location and name resolution for the domain.
+
+# Check DNS service status
+sudo systemctl status named-pkcs11
+
+# View DNS zones managed by IdM
+ipa dnszone-find
+
+# Check DNS records for your domain
+dig @localhost your-domain.com ANY
+Subtask 1.5: Examining PKI Component
+PKI manages certificates and provides encryption services.
+
+# Check Certificate Authority status
+sudo systemctl status pki-tomcatd@pki-tomcat
+
+# View CA information
+ipa ca-find
+
+# Check certificate store
+certutil -L -d /etc/pki/nssdb
+Task 2: Use IPA Commands to Interact with Each Service
+Subtask 2.1: Interacting with LDAP through IPA Commands
+LDAP operations in IdM are performed through ipa commands that abstract the complexity of direct LDAP queries.
+
+Creating and Managing Users (LDAP Operations)
+# Authenticate as admin
+kinit admin
+
+# Create a new user (stored in LDAP)
+ipa user-add testuser1 --first=Test --last=User --email=testuser1@example.com
+
+# View user information from LDAP
+ipa user-show testuser1
+
+# List all users in LDAP directory
+ipa user-find
+
+# Modify user attributes in LDAP
+ipa user-mod testuser1 --title="Software Engineer"
+
+# Search for users with specific criteria
+ipa user-find --first=Test
+Managing Groups (LDAP Operations)
+# Create a group (stored in LDAP)
+ipa group-add developers --desc="Development Team"
+
+# Add user to group
+ipa group-add-member developers --users=testuser1
+
+# View group information
+ipa group-show developers
+
+# List all groups
+ipa group-find
+Subtask 2.2: Interacting with Kerberos through IPA Commands
+Kerberos authentication is integrated into IdM and managed through ipa commands.
+
+Managing Kerberos Principals
+# View Kerberos realm information
+ipa config-show | grep realm
+
+# Set user password (creates Kerberos principal)
+ipa passwd testuser1
+
+# View service principals
+ipa service-find
+
+# Create a service principal
+ipa service-add HTTP/webserver.example.com
+
+# View host principals
+ipa host-find
+Testing Kerberos Authentication
+# Test Kerberos authentication for the new user
+# First, destroy current tickets
+kdestroy
+
+# Authenticate as the new user
+kinit testuser1
+
+# View current Kerberos tickets
+klist
+
+# Test ticket renewal
+kinit -R
+
+# Return to admin authentication
+kinit admin
+Subtask 2.3: Interacting with DNS through IPA Commands
+IdM's integrated DNS can be managed through ipa commands for service discovery and name resolution.
+
+Managing DNS Zones and Records
+# View existing DNS zones
+ipa dnszone-find
+
+# Add a DNS record
+ipa dnsrecord-add example.com webserver --a-rec=192.168.1.100
+
+# View DNS records for a zone
+ipa dnsrecord-find example.com
+
+# Add a CNAME record
+ipa dnsrecord-add example.com www --cname-rec=webserver.example.com.
+
+# Test DNS resolution
+nslookup webserver.example.com localhost
+Managing DNS Configuration
+# View DNS configuration
+ipa dnsconfig-show
+
+# View DNS servers
+ipa dnsserver-find
+
+# Check DNS forwarders
+ipa dnsconfig-show | grep forwarder
+Subtask 2.4: Interacting with PKI through IPA Commands
+PKI services in IdM manage certificates and provide encryption capabilities.
+
+Managing Certificates
+# View Certificate Authority information
+ipa ca-show ipa
+
+# Request a certificate for a service
+ipa cert-request certificate_request.csr --principal=HTTP/webserver.example.com
+
+# View certificates
+ipa cert-find
+
+# Check certificate status
+ipa cert-show 1
+Managing Certificate Profiles
+# List certificate profiles
+ipa certprofile-find
+
+# View a specific certificate profile
+ipa certprofile-show caIPAserviceCert
+
+# List certificate authorities
+ipa ca-find
+Task 3: Analyzing Component Integration
+Subtask 3.1: Understanding Service Dependencies
+Let's examine how the components work together:
+
+# Check all IdM-related services
+sudo systemctl list-units --type=service | grep -E "(ipa|krb5|dirsrv|named|pki)"
+
+# View service dependencies
+sudo systemctl list-dependencies ipa
+
+# Check IdM topology
+ipa topologysegment-find domain
+ipa topologysegment-find ca
+Subtask 3.2: Testing Integrated Authentication Flow
+# Test complete authentication flow
+# 1. DNS resolution
+nslookup ipa.example.com
+
+# 2. Kerberos authentication
+kinit testuser1
+
+# 3. LDAP query with Kerberos authentication
+ipa user-show testuser1
+
+# 4. Certificate-based operations
+ipa cert-find --user=testuser1
+Troubleshooting Common Issues
+Issue 1: Service Not Running
+# Check service status
+sudo systemctl status service-name
+
+# View service logs
+sudo journalctl -u service-name -f
+
+# Restart service if needed
+sudo systemctl restart service-name
+Issue 2: Authentication Problems
+# Clear Kerberos cache
+kdestroy
+
+# Check Kerberos configuration
+cat /etc/krb5.conf
+
+# Test basic authentication
+kinit admin
+Issue 3: DNS Resolution Issues
+# Test DNS resolution
+nslookup your-domain.com localhost
+
+# Check DNS configuration
+ipa dnsconfig-show
+
+# Verify DNS service
+sudo systemctl status named-pkcs11
+Verification and Testing
+Comprehensive System Test
+# Create a test script to verify all components
+cat > test_idm_components.sh << 'EOF'
+#!/bin/bash
+
+echo "=== Testing IdM Components ==="
+
+echo "1. Testing DNS..."
+nslookup $(hostname) localhost && echo "DNS: OK" || echo "DNS: FAILED"
+
+echo "2. Testing Kerberos..."
+kinit admin && echo "Kerberos: OK" || echo "Kerberos: FAILED"
+
+echo "3. Testing LDAP..."
+ipa user-find admin > /dev/null && echo "LDAP: OK" || echo "LDAP: FAILED"
+
+echo "4. Testing PKI..."
+ipa ca-find > /dev/null && echo "PKI: OK" || echo "PKI: FAILED"
+
+echo "=== Test Complete ==="
+EOF
+
+chmod +x test_idm_components.sh
+./test_idm_components.sh
+Lab Cleanup
+# Remove test user and group
+ipa user-del testuser1
+ipa group-del developers
+
+# Remove test DNS records
+ipa dnsrecord-del example.com webserver --a-rec=192.168.1.100
+ipa dnsrecord-del example.com www --cname-rec=webserver.example.com.
+
+# Remove test service
+ipa service-del HTTP/webserver.example.com
+Conclusion
+In this lab, you have successfully:
+
+Explored IdM Architecture: You examined the four core components of Identity Management (LDAP, Kerberos, DNS, and PKI) and understood how they work together to provide comprehensive identity services.
+
+Mastered IPA Commands: You learned to use ipa commands to interact with each service component, from managing users and groups in LDAP to handling Kerberos authentication, DNS records, and PKI certificates.
+
+Understood Component Integration: You discovered how these services depend on each other and work together to provide seamless authentication, authorization, and identity management.
+
+Gained Practical Experience: You performed hands-on tasks that simulate real-world identity management scenarios, preparing you for the Red Hat Certified Specialist in Identity Management exam.
+
+Why This Matters: Understanding IdM architecture is crucial for system administrators and security professionals. In enterprise environments, centralized identity management reduces security risks, simplifies user management, and ensures consistent access controls across all systems. The skills you've developed in this lab are directly applicable to managing identity services in production environments, making you more valuable in the job market and better prepared for advanced Red Hat certifications.
+
+The integration of these four components (LDAP, Kerberos, DNS, and PKI) creates a robust, secure, and scalable identity management solution that forms the backbone of modern enterprise IT infrastructure.
