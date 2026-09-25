@@ -1,0 +1,241 @@
+Lab 10: Enforcing Password Aging and Complexity
+Objectives
+By the end of this lab, students will be able to:
+
+Configure password aging policies using the ipa pwpolicy-mod command
+Implement password complexity requirements in Red Hat Identity Management (IdM)
+Test and validate password policy enforcement across IdM users
+Understand the security implications of password policies in enterprise environments
+Troubleshoot common password policy configuration issues
+Prerequisites
+Before starting this lab, students should have:
+
+Basic understanding of Linux command line operations
+Familiarity with Red Hat Identity Management (IdM) concepts
+Knowledge of user management in Linux environments
+Understanding of basic security principles
+Completion of previous IdM labs or equivalent experience
+Lab Environment
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines with Red Hat Identity Management already installed and configured. Simply click Start Lab to access your environment - no need to build your own virtual machine or install software.
+
+Your lab environment includes:
+
+Red Hat Enterprise Linux 9 server with IdM server role
+Pre-configured IdM domain: lab.example.com
+Administrative access to IdM server
+Test user accounts for policy testing
+Task 1: Configure Password Aging Policies
+Password aging policies help ensure users regularly update their passwords, reducing security risks from compromised credentials.
+
+Subtask 1.1: Review Current Password Policy
+First, let's examine the existing password policy configuration.
+
+Connect to your IdM server using the provided credentials in your lab environment.
+
+Authenticate as the IdM administrator:
+
+kinit admin
+Enter the admin password when prompted (provided in your lab environment).
+
+View the current global password policy:
+ipa pwpolicy-show
+Examine the output to understand current settings:
+Maximum password lifetime: How long passwords remain valid
+Minimum password lifetime: How soon users can change passwords
+Password history size: How many previous passwords are remembered
+Failure count interval: Time window for counting failed attempts
+Subtask 1.2: Configure Password Aging Parameters
+Now we'll modify the password policy to enforce aging requirements.
+
+Set maximum password lifetime to 90 days:
+ipa pwpolicy-mod --maxlife=90
+Set minimum password lifetime to 1 day (prevents immediate password changes):
+ipa pwpolicy-mod --minlife=1
+Configure password history to remember last 5 passwords:
+ipa pwpolicy-mod --history=5
+Set password expiration warning to 7 days:
+ipa pwpolicy-mod --priority=7
+Verify the updated policy:
+ipa pwpolicy-show
+Subtask 1.3: Create Group-Specific Password Policy
+Different user groups may require different password policies based on their security requirements.
+
+Create a test group for high-security users:
+ipa group-add --desc="High Security Users" highsec-users
+Create a specific password policy for this group:
+ipa pwpolicy-add highsec-users --maxlife=30 --minlife=2 --history=10 --minclasses=4 --minlength=12
+Verify the group-specific policy:
+ipa pwpolicy-show highsec-users
+Task 2: Enforce Password Complexity Rules
+Password complexity rules ensure users create strong passwords that resist common attack methods.
+
+Subtask 2.1: Configure Basic Complexity Requirements
+Set minimum password length to 8 characters:
+ipa pwpolicy-mod --minlength=8
+Require at least 3 character classes (uppercase, lowercase, numbers, special characters):
+ipa pwpolicy-mod --minclasses=3
+Set maximum number of consecutive identical characters to 2:
+ipa pwpolicy-mod --maxrepeat=2
+Configure maximum sequence length to 3 (prevents "123" or "abc" sequences):
+ipa pwpolicy-mod --maxsequence=3
+Subtask 2.2: Implement Advanced Complexity Rules
+Enable dictionary check to prevent common words:
+ipa pwpolicy-mod --dictcheck=TRUE
+Configure user attribute checking to prevent passwords containing username:
+ipa pwpolicy-mod --usercheck=TRUE
+Set account lockout parameters:
+ipa pwpolicy-mod --failurecountinterval=600 --lockouttime=1800 --maxfail=5
+This configuration means:
+
+failurecountinterval=600: Count failures within 10 minutes
+lockouttime=1800: Lock account for 30 minutes after max failures
+maxfail=5: Lock account after 5 failed attempts
+View the complete updated policy:
+ipa pwpolicy-show
+Subtask 2.3: Configure Password Expiration Notifications
+Set up email notifications for password expiration (if mail server is configured):
+ipa config-mod --emaildomain=lab.example.com
+Configure LDAP password policy attributes:
+ipa pwpolicy-mod --gracelimit=3
+This allows 3 grace logins after password expiration.
+
+Task 3: Test Password Policy Enforcement
+Testing ensures your password policies work as expected and don't create usability issues.
+
+Subtask 3.1: Create Test Users
+Create a regular test user:
+ipa user-add testuser1 --first=Test --last=User1 --password
+Enter a temporary password when prompted.
+
+Create a high-security test user:
+ipa user-add testuser2 --first=Test --last=User2 --password
+Add testuser2 to the high-security group:
+ipa group-add-member highsec-users --users=testuser2
+Subtask 3.2: Test Password Complexity Enforcement
+Test password length requirements:
+echo "short" | ipa passwd testuser1
+This should fail due to minimum length requirement.
+
+Test character class requirements:
+echo "password" | ipa passwd testuser1
+This should fail due to insufficient character classes.
+
+Test a compliant password:
+echo "SecurePass123!" | ipa passwd testuser1
+This should succeed.
+
+Test high-security user password requirements:
+echo "ComplexPass123!" | ipa passwd testuser2
+This should fail due to stricter requirements for the high-security group.
+
+Test a compliant high-security password:
+echo "VeryComplexPass123!@#" | ipa passwd testuser2
+This should succeed.
+
+Subtask 3.3: Test Password History and Aging
+Verify password history enforcement:
+# Try to reuse the same password immediately
+echo "SecurePass123!" | ipa passwd testuser1
+This should fail due to password history.
+
+Check password expiration information:
+ipa user-show testuser1 --all | grep -i password
+Test account lockout policy:
+# Simulate failed login attempts (run this 6 times)
+for i in {1..6}; do
+    echo "wrongpassword" | kinit testuser1 2>/dev/null
+    echo "Attempt $i completed"
+done
+Verify account lockout status:
+ipa user-show testuser1 | grep -i lock
+Unlock the test account:
+ipa user-unlock testuser1
+Subtask 3.4: Test Password Aging Notifications
+Manually set password expiration for testing:
+# Set password to expire in 2 days
+ipa user-mod testuser1 --password-expiration="$(date -d '+2 days' '+%Y%m%d%H%M%SZ')"
+Check expiration warning:
+kinit testuser1
+The system should display a warning about upcoming password expiration.
+
+View detailed password policy information for user:
+ipa pwpolicy-show --user=testuser1
+Troubleshooting Common Issues
+Issue 1: Password Policy Not Taking Effect
+Problem: New password policies don't seem to apply to existing users.
+
+Solution:
+
+# Clear the credential cache and re-authenticate
+kdestroy
+kinit admin
+# Verify policy is correctly configured
+ipa pwpolicy-show
+Issue 2: Users Cannot Change Passwords
+Problem: Users receive errors when trying to change passwords.
+
+Solution:
+
+# Check if minimum password lifetime is preventing changes
+ipa pwpolicy-show | grep "Min lifetime"
+# If needed, temporarily reduce minimum lifetime
+ipa pwpolicy-mod --minlife=0
+Issue 3: Account Lockout Issues
+Problem: Accounts are getting locked too frequently.
+
+Solution:
+
+# Adjust lockout parameters
+ipa pwpolicy-mod --maxfail=10 --failurecountinterval=1800
+# Unlock specific users
+ipa user-unlock username
+Issue 4: Group Policy Not Applied
+Problem: Group-specific password policies aren't working.
+
+Solution:
+
+# Verify group membership
+ipa group-show groupname
+# Check if group policy exists
+ipa pwpolicy-show groupname
+# Ensure user is properly added to group
+ipa group-add-member groupname --users=username
+Verification Commands
+Use these commands to verify your configuration:
+
+# Check all password policies
+ipa pwpolicy-find
+
+# View specific user's effective policy
+ipa pwpolicy-show --user=username
+
+# Check user account status
+ipa user-show username --all | grep -E "(password|lock|expire)"
+
+# Test password strength
+echo "testpassword" | ipa passwd username
+
+# View policy inheritance
+ipa user-show username | grep "Member of groups"
+Security Best Practices
+Regular Policy Review: Periodically review and update password policies based on security requirements and user feedback.
+
+Balanced Security: Ensure policies are secure but not so restrictive that they impact productivity.
+
+User Education: Train users on creating strong passwords that comply with policies.
+
+Monitoring: Regularly monitor failed authentication attempts and account lockouts.
+
+Exception Handling: Have procedures for handling legitimate lockouts and password reset requests.
+
+Conclusion
+In this lab, you have successfully:
+
+Configured comprehensive password aging policies that ensure users regularly update their passwords, reducing the risk of compromised credentials being used long-term
+Implemented robust password complexity requirements that force users to create strong passwords resistant to common attack methods
+Tested policy enforcement to ensure configurations work correctly and don't create usability issues
+Created group-specific policies that allow different security requirements for different user types
+Learned troubleshooting techniques for common password policy issues
+These skills are essential for maintaining secure enterprise environments and are directly applicable to the Red Hat Certified Specialist in Identity Management exam. Password policies form a critical foundation of identity security, helping organizations protect against unauthorized access while maintaining user productivity.
+
+The configuration you've implemented provides a strong security baseline that can be adapted to meet specific organizational requirements. Remember that password policies should be regularly reviewed and updated as security threats evolve and organizational needs change.
