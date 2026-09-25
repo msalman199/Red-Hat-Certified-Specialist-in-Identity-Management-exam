@@ -1,0 +1,433 @@
+Lab 7: Configuring Host-based Access Control (HBAC)
+Lab Objectives
+By the end of this lab, you will be able to:
+
+Understand the concept and importance of Host-based Access Control (HBAC) in enterprise environments
+Create and configure HBAC rules using the ipa hbacrule-add command
+Assign HBAC rules to specific users, groups, and hosts
+Test HBAC functionality by attempting logins from both allowed and denied hosts
+Troubleshoot common HBAC configuration issues
+Implement security best practices for access control in FreeIPA environments
+Prerequisites
+Before starting this lab, you should have:
+
+Basic understanding of Linux command line operations
+Familiarity with user and group management concepts
+Knowledge of SSH connectivity and authentication
+Understanding of FreeIPA server administration basics
+Completed previous labs on FreeIPA user and group management
+Required Knowledge Areas
+Linux system administration fundamentals
+Network security concepts
+Identity and Access Management (IAM) principles
+SSH key-based authentication
+Lab Environment Setup
+Ready-to-Use Cloud Machines
+Al Nafi provides pre-configured Linux-based cloud machines for this lab. Simply click Start Lab to access your environment. No need to build your own virtual machines or install software.
+
+Lab Infrastructure
+Your lab environment includes:
+
+FreeIPA Server: Pre-installed and configured FreeIPA server
+Client Machine 1: Enrolled FreeIPA client (allowed host)
+Client Machine 2: Enrolled FreeIPA client (restricted host)
+Test Users: Pre-created user accounts for testing
+Understanding Host-based Access Control (HBAC)
+Host-based Access Control (HBAC) is a security mechanism that controls which users can access which services on which hosts within a network. In FreeIPA, HBAC rules define:
+
+Who can access (users/groups)
+What they can access (services)
+Where they can access from (hosts/hostgroups)
+When they can access (time-based restrictions)
+Key HBAC Components
+HBAC Rules: Policies that define access permissions
+Users/Groups: Entities that require access
+Hosts/Host Groups: Target systems for access
+Services: Specific services like SSH, sudo, or custom applications
+Task 1: Creating HBAC Rules
+Subtask 1.1: Connect to FreeIPA Server
+First, establish connection to your FreeIPA server and authenticate as administrator.
+
+# Connect to FreeIPA server
+ssh admin@ipa-server.example.com
+
+# Authenticate with Kerberos
+kinit admin
+Enter the admin password when prompted.
+
+Subtask 1.2: Examine Current HBAC Rules
+Before creating new rules, let's examine the existing HBAC configuration.
+
+# List all existing HBAC rules
+ipa hbacrule-find
+
+# Show details of the default allow_all rule
+ipa hbacrule-show allow_all
+Expected Output Analysis:
+
+The allow_all rule typically grants broad access
+This rule should be disabled in production environments for security
+Subtask 1.3: Create Basic HBAC Rule
+Create your first HBAC rule to control SSH access for developers.
+
+# Create HBAC rule for developers
+ipa hbacrule-add dev_ssh_access \
+  --desc="Allow developers SSH access to development servers"
+
+# Verify the rule was created
+ipa hbacrule-show dev_ssh_access
+Subtask 1.4: Create Additional HBAC Rules
+Create more specific rules for different scenarios.
+
+# Create rule for database administrators
+ipa hbacrule-add dba_server_access \
+  --desc="Database administrators access to DB servers"
+
+# Create rule for web administrators
+ipa hbacrule-add web_admin_access \
+  --desc="Web administrators access to web servers"
+
+# Create restrictive rule for contractors
+ipa hbacrule-add contractor_limited_access \
+  --desc="Limited access for contractor accounts"
+Subtask 1.5: Configure Rule Services
+Add specific services to your HBAC rules.
+
+# Add SSH service to developer rule
+ipa hbacrule-add-service dev_ssh_access --hbacsvcs=sshd
+
+# Add multiple services to DBA rule
+ipa hbacrule-add-service dba_server_access --hbacsvcs=sshd
+ipa hbacrule-add-service dba_server_access --hbacsvcs=sudo
+
+# Verify service assignments
+ipa hbacrule-show dev_ssh_access --all
+Task 2: Assigning HBAC Rules to Users and Groups
+Subtask 2.1: Create Test Users and Groups
+First, create users and groups for testing HBAC functionality.
+
+# Create user groups
+ipa group-add developers --desc="Development team members"
+ipa group-add dbadmins --desc="Database administrators"
+ipa group-add contractors --desc="External contractors"
+
+# Create test users
+ipa user-add jdeveloper \
+  --first=John \
+  --last=Developer \
+  --password
+
+ipa user-add msmith \
+  --first=Mary \
+  --last=Smith \
+  --password
+
+ipa user-add ccontractor \
+  --first=Chris \
+  --last=Contractor \
+  --password
+Note: You'll be prompted to set initial passwords for each user.
+
+Subtask 2.2: Add Users to Groups
+Assign users to appropriate groups.
+
+# Add users to groups
+ipa group-add-member developers --users=jdeveloper
+ipa group-add-member dbadmins --users=msmith
+ipa group-add-member contractors --users=ccontractor
+
+# Verify group memberships
+ipa group-show developers
+ipa group-show dbadmins
+ipa group-show contractors
+Subtask 2.3: Create Host Groups
+Organize hosts into logical groups for easier management.
+
+# Create host groups
+ipa hostgroup-add dev-servers --desc="Development servers"
+ipa hostgroup-add db-servers --desc="Database servers"
+ipa hostgroup-add web-servers --desc="Web servers"
+
+# Add hosts to groups (replace with your actual hostnames)
+ipa hostgroup-add-member dev-servers --hosts=client1.example.com
+ipa hostgroup-add-member db-servers --hosts=client2.example.com
+ipa hostgroup-add-member web-servers --hosts=client1.example.com
+Subtask 2.4: Assign Users/Groups to HBAC Rules
+Connect users and groups to the appropriate HBAC rules.
+
+# Assign developers group to dev_ssh_access rule
+ipa hbacrule-add-user dev_ssh_access --groups=developers
+
+# Assign DBA group to database access rule
+ipa hbacrule-add-user dba_server_access --groups=dbadmins
+
+# Assign contractor user to limited access rule
+ipa hbacrule-add-user contractor_limited_access --users=ccontractor
+
+# Verify user assignments
+ipa hbacrule-show dev_ssh_access --all
+ipa hbacrule-show dba_server_access --all
+Subtask 2.5: Assign Host Groups to HBAC Rules
+Define which hosts each rule applies to.
+
+# Assign host groups to rules
+ipa hbacrule-add-host dev_ssh_access --hostgroups=dev-servers
+ipa hbacrule-add-host dba_server_access --hostgroups=db-servers
+ipa hbacrule-add-host contractor_limited_access --hostgroups=dev-servers
+
+# Add specific host restrictions for contractors
+ipa hbacrule-add-host contractor_limited_access --hosts=client1.example.com
+
+# Verify host assignments
+ipa hbacrule-show dev_ssh_access --all
+Subtask 2.6: Disable Default Allow All Rule
+For security, disable the permissive default rule.
+
+# Disable the allow_all rule
+ipa hbacrule-disable allow_all
+
+# Verify the rule is disabled
+ipa hbacrule-show allow_all
+Important: Only disable this rule after ensuring your specific rules are properly configured, or you may lock yourself out.
+
+Task 3: Testing HBAC Functionality
+Subtask 3.1: Test Allowed Access
+Test that authorized users can access their designated systems.
+
+# From your workstation, test developer access
+ssh jdeveloper@client1.example.com
+
+# If successful, you should see a login prompt
+# Enter the password you set for jdeveloper
+Expected Result: Login should succeed for jdeveloper on client1.
+
+Subtask 3.2: Test Denied Access
+Verify that unauthorized access is properly blocked.
+
+# Test contractor trying to access database server
+ssh ccontractor@client2.example.com
+
+# Test developer trying to access restricted server
+ssh jdeveloper@client2.example.com
+Expected Result: These login attempts should be denied with authentication errors.
+
+Subtask 3.3: Verify HBAC Rule Evaluation
+Use FreeIPA's built-in testing tools to verify rule evaluation.
+
+# Test HBAC rule evaluation for specific scenarios
+ipa hbactest \
+  --user=jdeveloper \
+  --host=client1.example.com \
+  --service=sshd
+
+# Test denied scenario
+ipa hbactest \
+  --user=ccontractor \
+  --host=client2.example.com \
+  --service=sshd
+
+# Test with detailed output
+ipa hbactest \
+  --user=msmith \
+  --host=client2.example.com \
+  --service=sshd \
+  --detail
+Subtask 3.4: Monitor Access Attempts
+Check system logs to verify HBAC enforcement.
+
+# On the FreeIPA server, check authentication logs
+sudo tail -f /var/log/secure
+
+# On client machines, check for HBAC-related messages
+sudo journalctl -u sssd -f
+Subtask 3.5: Test Rule Modifications
+Modify rules and test the changes take effect.
+
+# Add temporary access for contractor to db-servers
+ipa hbacrule-add-host contractor_limited_access --hostgroups=db-servers
+
+# Test the new access
+ssh ccontractor@client2.example.com
+
+# Remove the temporary access
+ipa hbacrule-remove-host contractor_limited_access --hostgroups=db-servers
+
+# Verify access is revoked
+ssh ccontractor@client2.example.com
+Advanced HBAC Configuration
+Time-based Access Control
+Create rules with time restrictions using external tools.
+
+# Create a rule for business hours only
+ipa hbacrule-add business_hours_only \
+  --desc="Access allowed only during business hours"
+
+# Note: Time-based restrictions require additional configuration
+# with tools like pam_time or custom scripts
+Service-specific Rules
+Create rules for specific services beyond SSH.
+
+# Create rule for sudo access
+ipa hbacrule-add sudo_access \
+  --desc="Sudo access for administrators"
+
+ipa hbacrule-add-service sudo_access --hbacsvcs=sudo
+ipa hbacrule-add-user sudo_access --groups=dbadmins
+ipa hbacrule-add-host sudo_access --hostgroups=db-servers
+Troubleshooting Common Issues
+Issue 1: Access Denied Despite Correct Rule
+Symptoms: User should have access but login fails
+
+Solution:
+
+# Check if SSSD cache needs clearing
+sudo sss_cache -E
+
+# Restart SSSD service
+sudo systemctl restart sssd
+
+# Verify rule syntax
+ipa hbacrule-show rulename --all
+Issue 2: Rules Not Taking Effect
+Symptoms: Changes to rules don't seem to apply
+
+Solution:
+
+# Force SSSD to refresh HBAC rules
+sudo sss_cache -r
+
+# Check SSSD configuration
+sudo sssctl config-check
+
+# Verify time synchronization
+sudo chrony sources -v
+Issue 3: Locked Out After Disabling allow_all
+Symptoms: Cannot access any systems after disabling default rule
+
+Solution:
+
+# Re-enable allow_all temporarily
+ipa hbacrule-enable allow_all
+
+# Create emergency admin access rule
+ipa hbacrule-add emergency_admin_access
+ipa hbacrule-add-user emergency_admin_access --users=admin
+ipa hbacrule-add-service emergency_admin_access --hbacsvcs=sshd
+ipa hbacrule-add-host emergency_admin_access --hosts=ipa-server.example.com
+Security Best Practices
+Principle of Least Privilege
+Create specific rules for each role
+Avoid overly broad access permissions
+Regularly review and audit access rules
+Rule Naming Conventions
+# Use descriptive names that indicate:
+# - Who: user/group type
+# - What: service/action
+# - Where: host/location
+
+# Good examples:
+# dev_ssh_webservers
+# dba_sudo_dbservers
+# contractor_limited_devhosts
+Regular Maintenance
+# Create script for regular HBAC rule auditing
+cat > /usr/local/bin/hbac-audit.sh << 'EOF'
+#!/bin/bash
+echo "=== HBAC Rules Audit ==="
+echo "Active Rules:"
+ipa hbacrule-find --enabled=true
+
+echo -e "\nDisabled Rules:"
+ipa hbacrule-find --enabled=false
+
+echo -e "\nRules without users:"
+for rule in $(ipa hbacrule-find --raw | grep "cn:" | cut -d: -f2); do
+    if ! ipa hbacrule-show $rule --raw | grep -q "memberuser"; then
+        echo "  $rule"
+    fi
+done
+EOF
+
+chmod +x /usr/local/bin/hbac-audit.sh
+Verification and Testing
+Comprehensive Test Matrix
+Create a test matrix to verify all access scenarios:
+
+# Create test script
+cat > /usr/local/bin/hbac-test-matrix.sh << 'EOF'
+#!/bin/bash
+
+USERS=("jdeveloper" "msmith" "ccontractor")
+HOSTS=("client1.example.com" "client2.example.com")
+
+echo "HBAC Test Matrix Results:"
+echo "========================"
+
+for user in "${USERS[@]}"; do
+    for host in "${HOSTS[@]}"; do
+        echo -n "Testing $user -> $host: "
+        result=$(ipa hbactest --user=$user --host=$host --service=sshd 2>/dev/null)
+        if echo "$result" | grep -q "Access granted"; then
+            echo "ALLOWED"
+        else
+            echo "DENIED"
+        fi
+    done
+done
+EOF
+
+chmod +x /usr/local/bin/hbac-test-matrix.sh
+./usr/local/bin/hbac-test-matrix.sh
+Lab Cleanup
+Remove Test Resources
+# Remove test users
+ipa user-del jdeveloper msmith ccontractor
+
+# Remove test groups
+ipa group-del developers dbadmins contractors
+
+# Remove test host groups
+ipa hostgroup-del dev-servers db-servers web-servers
+
+# Remove test HBAC rules
+ipa hbacrule-del dev_ssh_access
+ipa hbacrule-del dba_server_access
+ipa hbacrule-del contractor_limited_access
+ipa hbacrule-del business_hours_only
+ipa hbacrule-del sudo_access
+
+# Re-enable allow_all if needed for other labs
+ipa hbacrule-enable allow_all
+Conclusion
+In this lab, you have successfully:
+
+Mastered HBAC Concepts: Understood how Host-based Access Control works in FreeIPA environments and its critical role in enterprise security
+Created Comprehensive Rules: Built multiple HBAC rules using ipa hbacrule-add with different access patterns and restrictions
+Implemented User and Group Assignments: Connected users and groups to appropriate HBAC rules, demonstrating role-based access control
+Configured Host-based Restrictions: Set up host groups and assigned them to rules, controlling where users can access services
+Validated Security Controls: Tested both allowed and denied access scenarios to verify that HBAC rules function correctly
+Applied Security Best Practices: Learned to disable overly permissive default rules and implement the principle of least privilege
+Why This Matters
+Host-based Access Control is a fundamental security mechanism in enterprise environments because it:
+
+Reduces Attack Surface: Limits where users can authenticate, reducing potential entry points for attackers
+Enforces Compliance: Helps organizations meet regulatory requirements for access control and audit trails
+Enables Zero Trust: Supports zero-trust security models by requiring explicit permission for every access attempt
+Simplifies Management: Provides centralized control over access policies across the entire infrastructure
+Improves Incident Response: Makes it easier to quickly revoke access during security incidents
+Real-world Applications
+The skills you've developed in this lab directly apply to:
+
+Enterprise Identity Management: Managing access for thousands of users across complex infrastructures
+Compliance Auditing: Demonstrating proper access controls to auditors and regulators
+Security Incident Response: Quickly implementing access restrictions during security events
+DevOps Security: Integrating access controls into automated deployment pipelines
+Cloud Security: Extending on-premises access controls to hybrid and multi-cloud environments
+Next Steps
+To further develop your HBAC expertise:
+
+Explore integration with external authentication systems
+Learn about HBAC rule automation and Infrastructure as Code
+Study advanced troubleshooting techniques for complex access scenarios
+Practice implementing HBAC in high-availability FreeIPA deployments
+This comprehensive understanding of Host-based Access Control will serve as a strong foundation for advanced identity and access management scenarios in your career as a systems administrator or security professional.
