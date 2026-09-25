@@ -1,0 +1,222 @@
+Lab 8: Configuring sudo Rules
+Objectives
+By the end of this lab, students will be able to:
+
+Understand the concept of centralized sudo management in Identity Management (IdM)
+Create and configure sudo rules using the ipa sudorule-add command
+Assign sudo rules to specific users and groups within the IdM environment
+Test and validate sudo access permissions with different user accounts
+Troubleshoot common sudo rule configuration issues
+Implement security best practices for sudo rule management
+Prerequisites
+Before starting this lab, students should have:
+
+Basic understanding of Linux command line operations
+Familiarity with user and group management concepts
+Knowledge of sudo fundamentals and basic usage
+Understanding of Identity Management (IdM) server concepts
+Completion of previous IdM labs covering user and group creation
+Basic networking knowledge for client-server communication
+Lab Environment
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines for this lab. Simply click Start Lab to access your environment - no need to build your own virtual machines or configure complex networking.
+
+Your lab environment includes:
+
+IdM Server: Pre-installed FreeIPA server with administrative access
+IdM Client: Enrolled client machine for testing sudo rules
+Test Users: Pre-created user accounts for testing purposes
+Network Configuration: Fully configured DNS and network settings
+Task 1: Understanding Sudo Rules in IdM
+Subtask 1.1: Connect to the IdM Server
+Access your lab environment by clicking Start Lab
+Open a terminal on the IdM server machine
+Verify you have administrative access to the IdM server:
+kinit admin
+Enter the admin password when prompted
+Verify your Kerberos ticket:
+klist
+Subtask 1.2: Review Current Sudo Configuration
+List existing sudo rules in the IdM environment:
+ipa sudorule-find
+Check the default sudo rule configuration:
+ipa sudorule-show --all
+Understand the components of sudo rules by examining the help:
+ipa sudorule-add --help
+Task 2: Creating Sudo Rules
+Subtask 2.1: Create a Basic Sudo Rule
+Create a sudo rule for system administrators:
+ipa sudorule-add sysadmin-rule --desc="System Administrator sudo access"
+Verify the rule was created successfully:
+ipa sudorule-show sysadmin-rule
+Create a sudo rule for database administrators:
+ipa sudorule-add dbadmin-rule --desc="Database Administrator sudo access"
+Subtask 2.2: Create Specialized Sudo Rules
+Create a rule for network operations:
+ipa sudorule-add network-ops-rule --desc="Network operations sudo access"
+Create a rule for backup operations:
+ipa sudorule-add backup-ops-rule --desc="Backup operations sudo access"
+List all created sudo rules to confirm:
+ipa sudorule-find
+Task 3: Configuring Sudo Rule Commands
+Subtask 3.1: Create Sudo Command Groups
+Create a command group for system administration:
+ipa sudocmdgroup-add sysadmin-cmds --desc="System administration commands"
+Add commands to the system admin group:
+ipa sudocmdgroup-add-member sysadmin-cmds --sudocmds='/usr/bin/systemctl'
+ipa sudocmdgroup-add-member sysadmin-cmds --sudocmds='/usr/bin/mount'
+ipa sudocmdgroup-add-member sysadmin-cmds --sudocmds='/usr/bin/umount'
+ipa sudocmdgroup-add-member sysadmin-cmds --sudocmds='/usr/sbin/service'
+Create a command group for database operations:
+ipa sudocmdgroup-add dbadmin-cmds --desc="Database administration commands"
+Add database-specific commands:
+ipa sudocmdgroup-add-member dbadmin-cmds --sudocmds='/usr/bin/mysql'
+ipa sudocmdgroup-add-member dbadmin-cmds --sudocmds='/usr/bin/mysqldump'
+ipa sudocmdgroup-add-member dbadmin-cmds --sudocmds='/usr/bin/pg_dump'
+Subtask 3.2: Assign Command Groups to Sudo Rules
+Assign the system admin commands to the sysadmin rule:
+ipa sudorule-add-allow-command sysadmin-rule --sudocmdgroups=sysadmin-cmds
+Assign database commands to the database admin rule:
+ipa sudorule-add-allow-command dbadmin-rule --sudocmdgroups=dbadmin-cmds
+Create a rule with specific individual commands:
+ipa sudorule-add-allow-command network-ops-rule --sudocmds='/usr/sbin/iptables'
+ipa sudorule-add-allow-command network-ops-rule --sudocmds='/usr/bin/netstat'
+Task 4: Assigning Sudo Rules to Users and Groups
+Subtask 4.1: Create Test Users and Groups
+Create a system administrators group:
+ipa group-add sysadmins --desc="System Administrators Group"
+Create a database administrators group:
+ipa group-add dbadmins --desc="Database Administrators Group"
+Create test users:
+ipa user-add jsmith --first=John --last=Smith --password
+ipa user-add mjones --first=Mary --last=Jones --password
+ipa user-add bwilson --first=Bob --last=Wilson --password
+Add users to appropriate groups:
+ipa group-add-member sysadmins --users=jsmith
+ipa group-add-member dbadmins --users=mjones
+ipa group-add-member sysadmins --users=bwilson
+Subtask 4.2: Assign Sudo Rules to Groups
+Assign the sysadmin rule to the sysadmins group:
+ipa sudorule-add-user sysadmin-rule --groups=sysadmins
+Assign the dbadmin rule to the dbadmins group:
+ipa sudorule-add-user dbadmin-rule --groups=dbadmins
+Assign the network operations rule to a specific user:
+ipa sudorule-add-user network-ops-rule --users=jsmith
+Subtask 4.3: Configure Host-Based Access
+Add the client machine to sudo rules:
+ipa sudorule-add-host sysadmin-rule --hosts=client.example.com
+ipa sudorule-add-host dbadmin-rule --hosts=client.example.com
+ipa sudorule-add-host network-ops-rule --hosts=client.example.com
+Verify the complete configuration of a sudo rule:
+ipa sudorule-show sysadmin-rule --all
+Task 5: Testing Sudo Access
+Subtask 5.1: Prepare the Client Machine
+Switch to the IdM client machine terminal
+Ensure the client is properly enrolled:
+ipa-client-install --domain=example.com --server=server.example.com --realm=EXAMPLE.COM
+Verify SSSD is running and configured:
+systemctl status sssd
+Test name resolution for IdM users:
+getent passwd jsmith
+getent group sysadmins
+Subtask 5.2: Test User Authentication and Sudo Access
+Switch to user jsmith:
+su - jsmith
+Obtain a Kerberos ticket:
+kinit jsmith
+Test sudo access with allowed commands:
+sudo systemctl status sshd
+sudo mount
+Test access to restricted commands (should fail):
+sudo mysql
+Subtask 5.3: Test Different User Permissions
+Switch to user mjones:
+su - mjones
+kinit mjones
+Test database admin commands:
+sudo mysql --version
+sudo mysqldump --version
+Test system admin commands (should fail):
+sudo systemctl restart sshd
+Subtask 5.4: Verify Sudo Logging
+Check sudo logs on the client machine:
+sudo tail -f /var/log/secure
+Review SSSD logs for sudo operations:
+sudo tail -f /var/log/sssd/sssd_example.com.log
+Task 6: Advanced Sudo Rule Configuration
+Subtask 6.1: Configure Run-As Users
+Create a sudo rule with run-as user specification:
+ipa sudorule-add webapp-rule --desc="Web application management"
+Add run-as user options:
+ipa sudorule-add-runasuser webapp-rule --users=apache
+Add commands for web application management:
+ipa sudorule-add-allow-command webapp-rule --sudocmds='/usr/bin/systemctl restart httpd'
+ipa sudorule-add-allow-command webapp-rule --sudocmds='/usr/bin/systemctl reload httpd'
+Subtask 6.2: Configure Sudo Options
+Create a rule with NOPASSWD option:
+ipa sudorule-add monitoring-rule --desc="System monitoring without password"
+Add monitoring commands:
+ipa sudorule-add-allow-command monitoring-rule --sudocmds='/usr/bin/top'
+ipa sudorule-add-allow-command monitoring-rule --sudocmds='/usr/bin/ps'
+ipa sudorule-add-allow-command monitoring-rule --sudocmds='/usr/bin/netstat'
+Configure sudo options for the rule:
+ipa sudorule-add-option monitoring-rule --sudooption='!authenticate'
+Task 7: Troubleshooting and Validation
+Subtask 7.1: Common Troubleshooting Steps
+Verify sudo rule syntax and configuration:
+ipa sudorule-show sysadmin-rule --all
+Check SSSD sudo provider configuration:
+sudo sssctl config-check
+Clear SSSD cache if needed:
+sudo sss_cache -E
+Restart SSSD service:
+sudo systemctl restart sssd
+Subtask 7.2: Validate Rule Effectiveness
+Use the sudo -l command to list available commands for a user:
+sudo -l -U jsmith
+Test rule precedence and conflicts:
+ipa sudorule-find --users=jsmith
+Verify host-based restrictions:
+ipa sudorule-show sysadmin-rule | grep -i host
+Troubleshooting Tips
+Common Issues and Solutions
+Issue: Sudo rules not taking effect immediately
+
+Solution: Clear SSSD cache with sudo sss_cache -E and restart SSSD
+Issue: User cannot execute sudo commands despite being in the correct group
+
+Solution: Verify group membership with id username and check rule assignment
+Issue: Commands not recognized in sudo rules
+
+Solution: Use full path to commands (e.g., /usr/bin/systemctl instead of systemctl)
+Issue: Authentication failures
+
+Solution: Ensure Kerberos tickets are valid with klist and renew if necessary
+Issue: Host-based restrictions not working
+
+Solution: Verify hostname resolution and ensure client hostname matches rule configuration
+Security Best Practices
+Principle of Least Privilege: Grant only the minimum necessary sudo access
+Regular Auditing: Periodically review and audit sudo rules and assignments
+Command Specificity: Use specific command paths rather than wildcards when possible
+Group-Based Management: Prefer group-based rule assignments over individual user assignments
+Logging and Monitoring: Ensure comprehensive logging of sudo activities
+Password Policies: Carefully consider when to use NOPASSWD options
+Conclusion
+In this lab, you have successfully learned how to configure and manage sudo rules centrally using Identity Management (IdM). You accomplished the following key tasks:
+
+Created comprehensive sudo rules using the ipa sudorule-add command for different administrative roles
+Configured command groups and permissions to organize and control access to specific system commands
+Assigned sudo rules to users and groups effectively, implementing role-based access control
+Tested sudo access with different users to validate rule effectiveness and security
+Implemented advanced configurations including run-as users and sudo options
+Learned troubleshooting techniques for common sudo rule issues
+This centralized approach to sudo management provides several important benefits:
+
+Consistency: Ensures uniform sudo policies across all enrolled systems
+Scalability: Easily manage sudo access for large numbers of users and systems
+Security: Centralized control reduces the risk of misconfigurations
+Auditability: Comprehensive logging and reporting capabilities
+Efficiency: Reduces administrative overhead compared to managing individual sudoers files
+Understanding centralized sudo management is crucial for system administrators working in enterprise environments and is a key competency tested in the Red Hat Certified Specialist in Identity Management exam. These skills enable you to implement secure, scalable, and maintainable privilege escalation policies in production environments.
+
+The hands-on experience gained in this lab provides a solid foundation for managing complex sudo configurations in real-world scenarios, ensuring both security and operational efficiency in your organization's IT infrastructure.
