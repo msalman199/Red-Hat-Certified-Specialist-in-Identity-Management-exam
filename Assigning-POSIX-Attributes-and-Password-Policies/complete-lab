@@ -1,0 +1,298 @@
+Lab 5: Assigning POSIX Attributes and Password Policies
+Objectives
+By the end of this lab, you will be able to:
+
+Understand and configure POSIX attributes for Identity Management (IdM) users
+Assign specific User IDs (UID), Group IDs (GID), and shell configurations
+Create and modify password policies using IdM commands
+Test user authentication with applied policies
+Troubleshoot common POSIX attribute and password policy issues
+Implement security best practices for user account management
+Prerequisites
+Before starting this lab, you should have:
+
+Basic understanding of Linux command line operations
+Familiarity with user and group management concepts
+Knowledge of Identity Management (IdM) fundamentals from previous labs
+Understanding of POSIX standards and attributes
+Basic knowledge of shell environments and user authentication
+Required Knowledge Areas
+Linux user management commands
+Basic understanding of UID/GID concepts
+Familiarity with password security principles
+Understanding of shell environments (bash, sh, etc.)
+Lab Environment Setup
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines with Identity Management already installed and configured. Simply click Start Lab to access your environment - no need to build your own virtual machine or install software.
+
+Your lab environment includes:
+
+Red Hat Enterprise Linux 8/9 or CentOS Stream
+FreeIPA/IdM server pre-installed and configured
+Administrative access to the IdM system
+Sample users and groups for testing
+Task 1: Understanding and Assigning POSIX Attributes
+Subtask 1.1: Review Current User Attributes
+First, let's examine existing users and their current POSIX attributes.
+
+Connect to your IdM server and authenticate as an administrator:
+kinit admin
+List existing users to see current configurations:
+ipa user-find
+View detailed information for a specific user:
+ipa user-show testuser1
+Check current POSIX attributes for the user:
+ipa user-show testuser1 --all
+Subtask 1.2: Create a Test User for POSIX Configuration
+Create a new test user if one doesn't exist:
+ipa user-add posixuser1 --first=POSIX --last=TestUser --email=posixuser1@example.com
+Verify the user creation:
+ipa user-show posixuser1
+Subtask 1.3: Assign Specific UID (User ID)
+Check available UID range in your IdM configuration:
+ipa idrange-find
+Assign a specific UID to the user (choose a UID within your range, e.g., 10001):
+ipa user-mod posixuser1 --uid=10001
+Verify the UID assignment:
+ipa user-show posixuser1 | grep "User ID"
+Subtask 1.4: Assign Specific GID (Group ID)
+Create a custom group for our user:
+ipa group-add posixgroup1 --desc="POSIX Test Group" --gid=20001
+Assign the user to this group as primary group:
+ipa user-mod posixuser1 --gidnumber=20001
+Add user to the group as a member:
+ipa group-add-member posixgroup1 --users=posixuser1
+Verify group assignment:
+ipa user-show posixuser1 | grep -i group
+ipa group-show posixgroup1
+Subtask 1.5: Configure Shell Assignment
+Check available shells on the system:
+cat /etc/shells
+Assign a specific shell to the user:
+ipa user-mod posixuser1 --shell=/bin/bash
+Verify shell assignment:
+ipa user-show posixuser1 | grep "Login shell"
+Subtask 1.6: Set Home Directory
+Configure home directory path:
+ipa user-mod posixuser1 --homedir=/home/posixuser1
+Verify home directory setting:
+ipa user-show posixuser1 | grep "Home directory"
+Task 2: Configuring Password Policies
+Subtask 2.1: Review Current Password Policies
+View global password policy:
+ipa pwpolicy-show
+List all password policies:
+ipa pwpolicy-find
+Subtask 2.2: Create a Custom Password Policy
+Create a new password policy for a specific group:
+ipa pwpolicy-add posixgroup1 --maxlife=90 --minlife=1 --history=5 --minclasses=3 --minlength=12
+Parameter Explanation:
+
+--maxlife=90: Password expires after 90 days
+--minlife=1: Minimum 1 day before password can be changed again
+--history=5: Remember last 5 passwords to prevent reuse
+--minclasses=3: Require at least 3 character classes (uppercase, lowercase, numbers, symbols)
+--minlength=12: Minimum password length of 12 characters
+Verify the policy creation:
+ipa pwpolicy-show posixgroup1
+Subtask 2.3: Modify Global Password Policy
+Modify the global password policy with enhanced security:
+ipa pwpolicy-mod --maxlife=60 --minlife=1 --history=3 --minclasses=2 --minlength=8 --maxfail=3 --failinterval=300 --lockouttime=600
+Additional Parameters:
+
+--maxfail=3: Lock account after 3 failed attempts
+--failinterval=300: Reset failure count after 5 minutes (300 seconds)
+--lockouttime=600: Keep account locked for 10 minutes (600 seconds)
+Verify global policy changes:
+ipa pwpolicy-show
+Subtask 2.4: Create User-Specific Password Policy
+Create a policy for high-privilege users:
+ipa pwpolicy-add admingroup --maxlife=30 --minlife=1 --history=10 --minclasses=4 --minlength=16 --maxfail=2
+Create the admin group if it doesn't exist:
+ipa group-add admingroup --desc="Administrative Users Group"
+Verify the admin policy:
+ipa pwpolicy-show admingroup
+Task 3: Testing User Login with Applied Policies
+Subtask 3.1: Set Initial Password for Test User
+Set a password for the test user that meets policy requirements:
+ipa passwd posixuser1
+When prompted, enter a password that meets your policy requirements (12+ characters, 3 character classes).
+
+Example strong password: MySecure123!Pass
+
+Subtask 3.2: Test User Authentication
+Test kinit authentication with the new user:
+kinit posixuser1
+Verify successful authentication:
+klist
+Check user information from the user's perspective:
+id posixuser1
+Subtask 3.3: Test Password Policy Enforcement
+Attempt to change password immediately (should fail due to minlife policy):
+ipa passwd posixuser1
+Test with a weak password that doesn't meet policy requirements:
+echo "weakpass" | ipa passwd posixuser1 --password
+Test password history by trying to reuse the same password later.
+Subtask 3.4: Test Account Lockout Policy
+Simulate failed login attempts to test lockout:
+# This will fail intentionally
+echo "wrongpassword" | kinit posixuser1
+echo "wrongpassword" | kinit posixuser1
+echo "wrongpassword" | kinit posixuser1
+Check if account is locked:
+ipa user-status posixuser1
+Unlock the account if needed:
+ipa user-unlock posixuser1
+Subtask 3.5: Verify POSIX Attributes in System
+Check if user appears in system files:
+getent passwd posixuser1
+getent group posixgroup1
+Verify UID/GID mapping:
+id posixuser1
+Test shell access (if SSH is configured):
+# From another terminal or system
+ssh posixuser1@your-idm-server
+Advanced Configuration Tasks
+Task 4: Fine-Tuning Password Policies
+Subtask 4.1: Configure Password Complexity
+Set advanced password complexity rules:
+ipa pwpolicy-mod --minclasses=4 --maxrepeat=2 --maxsequence=3 --dictcheck=true
+Parameters Explanation:
+
+--maxrepeat=2: Maximum 2 consecutive identical characters
+--maxsequence=3: Maximum 3 consecutive characters in sequence (abc, 123)
+--dictcheck=true: Check against dictionary words
+Subtask 4.2: Configure Grace Period
+Set password expiration grace period:
+ipa pwpolicy-mod --gracelimit=3
+This allows 3 logins after password expiration before forcing a change.
+
+Task 5: Monitoring and Maintenance
+Subtask 5.1: Monitor Password Status
+Check password expiration for users:
+ipa user-show posixuser1 --all | grep -i password
+List users with expiring passwords:
+ipa user-find --pkey-only | while read user; do
+    if [[ $user =~ "User login:" ]]; then
+        username=$(echo $user | cut -d: -f2 | tr -d ' ')
+        echo "Checking $username"
+        ipa user-show $username --all | grep -i "password expiration"
+    fi
+done
+Subtask 5.2: Generate Password Policy Reports
+Create a script to check policy compliance:
+cat > check_policies.sh << 'EOF'
+#!/bin/bash
+echo "=== Password Policy Report ==="
+echo "Global Policy:"
+ipa pwpolicy-show
+echo ""
+echo "Group-specific Policies:"
+ipa pwpolicy-find | grep "Group:"
+echo ""
+echo "Users with custom policies:"
+ipa user-find --pkey-only | grep "User login:" | while read line; do
+    user=$(echo $line | cut -d: -f2 | tr -d ' ')
+    policy=$(ipa user-show $user --all 2>/dev/null | grep "Password policy")
+    if [[ -n "$policy" ]]; then
+        echo "$user: $policy"
+    fi
+done
+EOF
+
+chmod +x check_policies.sh
+./check_policies.sh
+Troubleshooting Common Issues
+Issue 1: UID/GID Conflicts
+Problem: Error when assigning UID or GID that already exists.
+
+Solution:
+
+# Check for existing UID
+ipa user-find --uid=10001
+# Check for existing GID
+ipa group-find --gid=20001
+# Use different numbers if conflicts exist
+Issue 2: Password Policy Not Applied
+Problem: Password policy changes don't seem to take effect.
+
+Solution:
+
+# Clear credential cache
+kdestroy
+# Re-authenticate
+kinit admin
+# Verify policy is active
+ipa pwpolicy-show groupname
+Issue 3: User Cannot Login
+Problem: User authentication fails despite correct password.
+
+Solution:
+
+# Check user status
+ipa user-status username
+# Check if account is locked
+ipa user-unlock username
+# Verify password hasn't expired
+ipa user-show username --all | grep -i password
+Issue 4: POSIX Attributes Not Recognized
+Problem: System doesn't recognize POSIX attributes.
+
+Solution:
+
+# Ensure SSSD is running
+systemctl status sssd
+# Clear SSSD cache
+sss_cache -E
+# Restart SSSD if needed
+systemctl restart sssd
+Best Practices and Security Considerations
+Security Best Practices
+UID/GID Management:
+
+Use consistent UID/GID ranges across systems
+Reserve low numbers (< 1000) for system accounts
+Document UID/GID assignments
+Password Policy Design:
+
+Balance security with usability
+Consider user roles when setting policies
+Implement appropriate lockout policies
+Regular Maintenance:
+
+Monitor password expiration dates
+Review and update policies regularly
+Audit user access and privileges
+Performance Considerations
+SSSD Configuration:
+
+Optimize cache settings for better performance
+Configure appropriate refresh intervals
+Monitor SSSD logs for issues
+Policy Complexity:
+
+Avoid overly complex password requirements
+Balance security with user productivity
+Test policies before full deployment
+Conclusion
+In this lab, you have successfully:
+
+Configured POSIX attributes including UID, GID, and shell assignments for IdM users
+Implemented comprehensive password policies with various security parameters
+Tested user authentication and verified policy enforcement
+Learned troubleshooting techniques for common POSIX and password policy issues
+Applied security best practices for identity management
+Why This Matters
+Understanding POSIX attributes and password policies is crucial for:
+
+System Integration: Ensuring IdM users work seamlessly with Linux systems
+Security Compliance: Meeting organizational and regulatory security requirements
+User Management: Providing consistent user experience across systems
+Access Control: Implementing proper authentication and authorization controls
+Next Steps
+After completing this lab, you should:
+
+Practice creating different password policies for various user groups
+Experiment with advanced POSIX attributes and configurations
+Integrate these concepts with other IdM features like sudo rules and RBAC
+Develop monitoring and maintenance procedures for your environment
+This knowledge prepares you for the Red Hat Certified Specialist in Identity Management exam and real-world identity management scenarios where proper user attribute management and password policies are essential for maintaining secure, well-organized systems.
