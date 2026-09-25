@@ -1,0 +1,302 @@
+Lab 4: User and Group Management
+Objectives
+By the end of this lab, you will be able to:
+
+Create new users and groups using FreeIPA command-line interface (CLI)
+Create new users and groups using FreeIPA Web UI
+Modify user and group attributes through both CLI and Web UI
+Delete users and groups safely
+Understand the relationship between users and groups in identity management
+Navigate the FreeIPA management interface effectively
+Prerequisites
+Before starting this lab, you should have:
+
+Basic understanding of Linux command-line operations
+Familiarity with user and group concepts in Linux systems
+Knowledge of SSH connections and terminal usage
+Understanding of basic networking concepts
+Completion of previous FreeIPA installation and configuration labs
+Lab Environment
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines with FreeIPA already installed and configured. Simply click Start Lab to access your environment - no need to build your own virtual machine or install software.
+
+Your lab environment includes:
+
+CentOS/RHEL 8 or 9 server with FreeIPA server installed
+FreeIPA client machine for testing
+Web browser access to FreeIPA Web UI
+Administrative privileges for FreeIPA management
+Task 1: Creating Users and Groups Using CLI
+Subtask 1.1: Verify FreeIPA Service Status
+First, let's ensure that FreeIPA services are running properly.
+
+Connect to your FreeIPA server via SSH or terminal
+Check FreeIPA service status:
+sudo systemctl status ipa
+Verify you can authenticate as admin:
+kinit admin
+Enter the admin password when prompted.
+
+Confirm your Kerberos ticket:
+klist
+Subtask 1.2: Create Groups Using ipa group-add
+Groups should typically be created before users to establish proper organizational structure.
+
+Create a basic group:
+ipa group-add developers --desc="Software Development Team"
+Create additional groups for different departments:
+ipa group-add marketing --desc="Marketing Department"
+ipa group-add hr --desc="Human Resources Department"
+ipa group-add finance --desc="Finance Department"
+Create a group with specific GID (Group ID):
+ipa group-add contractors --desc="External Contractors" --gid=5000
+Verify groups were created:
+ipa group-find
+Subtask 1.3: Create Users Using ipa user-add
+Now let's create users and assign them to appropriate groups.
+
+Create a basic user:
+ipa user-add jsmith --first=John --last=Smith --email=jsmith@company.com
+Create a user with additional attributes:
+ipa user-add mjohnson --first=Mary --last=Johnson --email=mjohnson@company.com --title="Senior Developer" --phone="555-0123"
+Create a user with specific UID and shell:
+ipa user-add bwilson --first=Bob --last=Wilson --email=bwilson@company.com --uid=2001 --shell=/bin/bash
+Create users for different departments:
+ipa user-add agarcia --first=Ana --last=Garcia --email=agarcia@company.com --title="Marketing Manager"
+ipa user-add dlee --first=David --last=Lee --email=dlee@company.com --title="HR Specialist"
+Set initial passwords for users:
+ipa passwd jsmith
+ipa passwd mjohnson
+ipa passwd bwilson
+ipa passwd agarcia
+ipa passwd dlee
+Add users to groups:
+ipa group-add-member developers --users=jsmith,mjohnson,bwilson
+ipa group-add-member marketing --users=agarcia
+ipa group-add-member hr --users=dlee
+Verify user creation:
+ipa user-find
+Task 2: Modifying User and Group Attributes
+Subtask 2.1: Modify User Attributes Using ipa user-mod
+Update user's job title:
+ipa user-mod jsmith --title="Lead Developer"
+Change user's phone number:
+ipa user-mod mjohnson --phone="555-0456"
+Update user's manager:
+ipa user-mod bwilson --manager=jsmith
+Add additional email address:
+ipa user-mod agarcia --addattr=mail=ana.garcia@company.com
+Change user's home directory:
+ipa user-mod dlee --homedir=/home/custom/dlee
+Disable a user account temporarily:
+ipa user-disable bwilson
+Re-enable the user account:
+ipa user-enable bwilson
+View detailed user information:
+ipa user-show jsmith --all
+Subtask 2.2: Modify Group Attributes Using ipa group-mod
+Update group description:
+ipa group-mod developers --desc="Software Development and Engineering Team"
+Add users to existing group:
+ipa group-add-member finance --users=dlee
+Remove users from group:
+ipa group-remove-member hr --users=dlee
+Add a group as a member of another group (nested groups):
+ipa group-add-member developers --groups=contractors
+View detailed group information:
+ipa group-show developers --all
+List all members of a group:
+ipa group-show developers
+Task 3: Using FreeIPA Web UI for User and Group Management
+Subtask 3.1: Access FreeIPA Web UI
+Open your web browser and navigate to your FreeIPA server:
+https://your-ipa-server.domain.com
+Accept the security certificate (if prompted)
+Log in using admin credentials:
+Username: admin
+Password: your-admin-password
+Subtask 3.2: Create Users via Web UI
+Navigate to Identity → Users
+Click "Add" button
+Fill in user details:
+User login: swilliams
+First name: Sarah
+Last name: Williams
+Email: swilliams@company.com
+Click "Add and Edit"
+In the user details page, add additional information:
+Job Title: Project Manager
+Phone: 555-0789
+Manager: Select from dropdown
+Click "Save"
+Subtask 3.3: Create Groups via Web UI
+Navigate to Identity → Groups
+Click "Add" button
+Fill in group details:
+Group name: projectmanagers
+Description: Project Management Team
+Click "Add and Edit"
+In the Members tab, add users:
+Click "Add" in the Users section
+Select swilliams
+Click "Add"
+Click "Save"
+Subtask 3.4: Modify Users and Groups via Web UI
+Modify user attributes:
+
+Go to Identity → Users
+Click on swilliams
+Update job title to Senior Project Manager
+Add to additional groups using the Groups tab
+Save changes
+Modify group attributes:
+
+Go to Identity → Groups
+Click on projectmanagers
+Update description
+Add or remove members as needed
+Save changes
+Task 4: Deleting Users and Groups
+Subtask 4.1: Safe Deletion Practices
+Before deleting users or groups, it's important to follow proper procedures.
+
+Check user's group memberships:
+ipa user-show bwilson --all | grep "Member of groups"
+Check if user owns any resources:
+ipa user-show bwilson --all
+Remove user from all groups first (optional, but recommended):
+ipa group-remove-member developers --users=bwilson
+Subtask 4.2: Delete Users Using CLI
+Delete a user account:
+ipa user-del bwilson
+Delete multiple users at once:
+ipa user-del agarcia dlee
+Verify user deletion:
+ipa user-find bwilson
+Subtask 4.3: Delete Groups Using CLI
+Check group membership before deletion:
+ipa group-show contractors
+Delete an empty group:
+ipa group-del contractors
+Delete a group with members (this will remove the group but not the users):
+ipa group-del marketing
+Verify group deletion:
+ipa group-find marketing
+Subtask 4.4: Delete Users and Groups via Web UI
+Delete users via Web UI:
+
+Navigate to Identity → Users
+Select the checkbox next to the user(s) you want to delete
+Click "Delete" button
+Confirm the deletion
+Delete groups via Web UI:
+
+Navigate to Identity → Groups
+Select the checkbox next to the group(s) you want to delete
+Click "Delete" button
+Confirm the deletion
+Advanced Operations
+Bulk User Creation
+For creating multiple users efficiently, you can use a script:
+
+#!/bin/bash
+# bulk_user_creation.sh
+
+users=(
+    "tsmith:Tom:Smith:tsmith@company.com"
+    "jdoe:Jane:Doe:jdoe@company.com"
+    "mwilson:Mike:Wilson:mwilson@company.com"
+)
+
+for user_info in "${users[@]}"; do
+    IFS=':' read -r username firstname lastname email <<< "$user_info"
+    ipa user-add "$username" --first="$firstname" --last="$lastname" --email="$email"
+    echo "Created user: $username"
+done
+User and Group Reporting
+Generate reports on your user and group structure:
+
+# Count total users
+ipa user-find --sizelimit=0 | grep "Number of entries returned"
+
+# Count total groups
+ipa group-find --sizelimit=0 | grep "Number of entries returned"
+
+# List all users in a specific group
+ipa group-show developers --all | grep "Member users"
+Troubleshooting Common Issues
+Issue 1: Permission Denied Errors
+Problem: Getting permission denied when trying to create users or groups.
+
+Solution:
+
+# Ensure you have valid Kerberos ticket
+kinit admin
+klist
+
+# Check if you have proper admin privileges
+ipa user-show admin
+Issue 2: User Already Exists Error
+Problem: Trying to create a user that already exists.
+
+Solution:
+
+# Check if user exists
+ipa user-find username
+
+# If user exists but is deleted, you may need to use --force
+ipa user-add username --force
+Issue 3: Group Membership Issues
+Problem: Cannot add user to group or remove user from group.
+
+Solution:
+
+# Verify both user and group exist
+ipa user-show username
+ipa group-show groupname
+
+# Check current group memberships
+ipa user-show username --all | grep "Member of groups"
+Issue 4: Web UI Access Problems
+Problem: Cannot access FreeIPA Web UI.
+
+Solution:
+
+Check if httpd service is running:
+sudo systemctl status httpd
+Verify firewall settings:
+sudo firewall-cmd --list-services
+Check certificate validity and browser settings
+Verification and Testing
+Test User Authentication
+Test user login via SSH:
+ssh jsmith@your-ipa-client.domain.com
+Test user authentication:
+# On client machine
+kinit jsmith
+klist
+Verify Group Memberships
+Check user's group memberships:
+id jsmith
+groups jsmith
+Verify group information:
+getent group developers
+Conclusion
+In this lab, you have successfully accomplished the following:
+
+Key Achievements:
+
+Created users and groups using both FreeIPA CLI commands and Web UI
+Modified user and group attributes to reflect organizational changes
+Safely deleted users and groups following best practices
+Learned to navigate both command-line and web-based management interfaces
+Implemented proper user-group relationships for access control
+Why This Matters: User and group management is fundamental to identity management and security in enterprise environments. The skills you've developed enable you to:
+
+Maintain organized user hierarchies that reflect your organization's structure
+Implement role-based access control through group memberships
+Efficiently manage user lifecycle from creation to deletion
+Use both automated (CLI) and interactive (Web UI) management approaches
+Ensure security through proper user and group administration
+Real-World Applications: These skills are essential for system administrators managing enterprise identity systems, particularly in environments preparing for Red Hat Certified Specialist in Identity Management certification. The ability to manage users and groups effectively is crucial for maintaining security, compliance, and operational efficiency in modern IT infrastructures.
+
+Next Steps: Consider exploring advanced topics such as user templates, automated provisioning, integration with external identity sources, and policy-based access controls to further enhance your identity management capabilities.
