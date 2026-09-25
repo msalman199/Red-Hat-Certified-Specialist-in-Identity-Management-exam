@@ -1,0 +1,516 @@
+Lab 9: Configuring Kerberos Single Sign-On (SSO)
+Objectives
+By the end of this lab, students will be able to:
+
+Understand the fundamentals of Kerberos authentication protocol
+Configure a Kerberos Key Distribution Center (KDC) server
+Set up Kerberos clients for Single Sign-On authentication
+Test SSO functionality using kinit and klist commands
+Automate Kerberos SSO login on client systems
+Troubleshoot common Kerberos authentication issues
+Prerequisites
+Before starting this lab, students should have:
+
+Basic understanding of Linux command line operations
+Knowledge of network authentication concepts
+Familiarity with text editors like vi or nano
+Understanding of DNS configuration basics
+Basic knowledge of system administration tasks
+Lab Environment
+Al Nafi provides ready-to-use Linux-based cloud machines for this lab. Simply click Start Lab to access your pre-configured environment. No need to build your own virtual machines.
+
+Your lab environment includes:
+
+kdc-server: CentOS/RHEL 8 machine acting as Kerberos KDC
+client1: CentOS/RHEL 8 machine acting as Kerberos client
+client2: CentOS/RHEL 8 machine acting as additional Kerberos client
+Task 1: Configure Kerberos for Single Sign-On (SSO)
+Subtask 1.1: Set Up the Kerberos KDC Server
+Step 1: Connect to the KDC Server
+
+Access your KDC server machine and switch to root user:
+
+sudo su -
+Step 2: Install Kerberos Server Packages
+
+Install the required Kerberos server packages:
+
+yum install -y krb5-server krb5-libs krb5-workstation
+Step 3: Configure the Kerberos Database
+
+Edit the KDC configuration file:
+
+vi /etc/krb5kdc/kdc.conf
+Replace the contents with:
+
+[kdcdefaults]
+ kdc_ports = 88
+ kdc_tcp_ports = 88
+
+[realms]
+ EXAMPLE.COM = {
+  #master_key_type = aes256-cts
+  acl_file = /etc/krb5kdc/kadm5.acl
+  dict_file = /usr/share/dict/words
+  admin_keytab = /etc/krb5kdc/kadm5.keytab
+  supported_enctypes = aes256-cts:normal aes128-cts:normal des3-hmac-sha1:normal arcfour-hmac:normal camellia256-cts:normal camellia128-cts:normal des-hmac-sha1:normal des-cbc-md5:normal des-cbc-crc:normal
+ }
+Step 4: Configure Kerberos Client Settings
+
+Edit the main Kerberos configuration file:
+
+vi /etc/krb5.conf
+Replace the contents with:
+
+[logging]
+ default = FILE:/var/log/krb5libs.log
+ kdc = FILE:/var/log/krb5kdc.log
+ admin_server = FILE:/var/log/kadmind.log
+
+[libdefaults]
+ dns_lookup_realm = false
+ ticket_lifetime = 24h
+ renew_lifetime = 7d
+ forwardable = true
+ rdns = false
+ pkinit_anchors = FILE:/etc/pki/tls/certs/ca-bundle.crt
+ default_realm = EXAMPLE.COM
+ default_ccache_name = KEYRING:persistent:%{uid}
+
+[realms]
+ EXAMPLE.COM = {
+  kdc = kdc-server.example.com
+  admin_server = kdc-server.example.com
+ }
+
+[domain_realm]
+ .example.com = EXAMPLE.COM
+ example.com = EXAMPLE.COM
+Step 5: Create the Kerberos Database
+
+Initialize the Kerberos database:
+
+kdb5_util create -s -r EXAMPLE.COM
+When prompted, enter a master password (remember this password).
+
+Step 6: Configure Administrative Access
+
+Edit the ACL file to define administrative permissions:
+
+vi /etc/krb5kdc/kadm5.acl
+Add the following line:
+
+*/admin@EXAMPLE.COM    *
+Step 7: Start and Enable Kerberos Services
+
+Start the KDC and admin services:
+
+systemctl start krb5kdc
+systemctl start kadmin
+systemctl enable krb5kdc
+systemctl enable kadmin
+Step 8: Configure Firewall
+
+Open the necessary ports:
+
+firewall-cmd --permanent --add-port=88/tcp
+firewall-cmd --permanent --add-port=88/udp
+firewall-cmd --permanent --add-port=749/tcp
+firewall-cmd --reload
+Subtask 1.2: Create Kerberos Principals
+Step 1: Access Kerberos Administration
+
+Connect to the Kerberos administrative interface:
+
+kadmin.local
+Step 2: Create Administrative Principal
+
+Create an admin principal:
+
+addprinc admin/admin@EXAMPLE.COM
+Enter a password when prompted.
+
+Step 3: Create User Principals
+
+Create test user principals:
+
+addprinc testuser1@EXAMPLE.COM
+addprinc testuser2@EXAMPLE.COM
+addprinc ssouser@EXAMPLE.COM
+Set passwords for each user when prompted.
+
+Step 4: Create Host Principals
+
+Create host principals for client machines:
+
+addprinc -randkey host/client1.example.com@EXAMPLE.COM
+addprinc -randkey host/client2.example.com@EXAMPLE.COM
+Step 5: Exit Kerberos Administration
+
+quit
+Subtask 1.3: Configure Kerberos Clients
+Step 1: Connect to Client1
+
+Switch to the client1 machine and become root:
+
+sudo su -
+Step 2: Install Kerberos Client Packages
+
+yum install -y krb5-workstation krb5-libs
+Step 3: Configure Client Kerberos Settings
+
+Copy the krb5.conf from the KDC server or create it manually:
+
+vi /etc/krb5.conf
+Use the same configuration as created on the KDC server in Subtask 1.1, Step 4.
+
+Step 4: Configure Host Resolution
+
+Ensure proper hostname resolution by editing the hosts file:
+
+vi /etc/hosts
+Add entries for your lab environment:
+
+192.168.1.10    kdc-server.example.com kdc-server
+192.168.1.11    client1.example.com client1
+192.168.1.12    client2.example.com client2
+Note: Replace IP addresses with your actual lab machine IPs.
+
+Step 5: Repeat Client Configuration
+
+Repeat steps 1-4 for client2 machine.
+
+Task 2: Test SSO with kinit and klist
+Subtask 2.1: Basic Authentication Testing
+Step 1: Test Initial Authentication
+
+On client1, test authentication with a user principal:
+
+kinit testuser1@EXAMPLE.COM
+Enter the password when prompted.
+
+Step 2: Verify Ticket Cache
+
+Check the current Kerberos tickets:
+
+klist
+You should see output similar to:
+
+Ticket cache: KEYRING:persistent:1000:1000
+Default principal: testuser1@EXAMPLE.COM
+
+Valid starting       Expires              Service principal
+12/01/2023 10:00:00  12/02/2023 10:00:00  krbtgt/EXAMPLE.COM@EXAMPLE.COM
+        renew until 12/08/2023 10:00:00
+Step 3: Test Ticket Information
+
+Get detailed ticket information:
+
+klist -f
+This shows additional flags and encryption types.
+
+Subtask 2.2: Advanced Ticket Management
+Step 1: Test Ticket Renewal
+
+Renew the current ticket:
+
+kinit -R
+Step 2: Test Different Users
+
+Switch to a different user:
+
+kinit ssouser@EXAMPLE.COM
+klist
+Step 3: Test Ticket Destruction
+
+Destroy current tickets:
+
+kdestroy
+klist
+You should see a message indicating no credentials cache found.
+
+Step 4: Test Forwardable Tickets
+
+Create forwardable tickets:
+
+kinit -f testuser1@EXAMPLE.COM
+klist -f
+Look for the F flag indicating forwardable tickets.
+
+Subtask 2.3: Cross-Client Testing
+Step 1: Test from Client2
+
+Switch to client2 and test authentication:
+
+kinit testuser2@EXAMPLE.COM
+klist
+Step 2: Test Network Connectivity
+
+Verify KDC connectivity:
+
+telnet kdc-server.example.com 88
+Press Ctrl+C to exit if connection is successful.
+
+Task 3: Automate Kerberos SSO Login on Client Systems
+Subtask 3.1: Configure PAM for Kerberos Authentication
+Step 1: Install Additional Packages
+
+On both client machines, install PAM Kerberos module:
+
+yum install -y pam_krb5
+Step 2: Configure PAM Authentication
+
+Edit the system authentication configuration:
+
+vi /etc/pam.d/system-auth
+Add the following lines after the existing auth lines:
+
+auth        sufficient    pam_krb5.so use_first_pass
+account     [default=bad success=ok user_unknown=ignore] pam_krb5.so
+password    sufficient    pam_krb5.so use_authtok
+session     optional      pam_krb5.so
+Step 3: Configure Password Authentication
+
+Edit the password authentication file:
+
+vi /etc/pam.d/password-auth
+Add the same lines as in Step 2.
+
+Subtask 3.2: Create Automatic Login Scripts
+Step 1: Create Kerberos Login Script
+
+Create a script for automatic Kerberos authentication:
+
+vi /usr/local/bin/kerberos-login.sh
+Add the following content:
+
+#!/bin/bash
+
+# Kerberos SSO Login Script
+# Usage: kerberos-login.sh username
+
+USERNAME=$1
+REALM="EXAMPLE.COM"
+
+if [ -z "$USERNAME" ]; then
+    echo "Usage: $0 <username>"
+    exit 1
+fi
+
+# Check if user already has valid tickets
+if klist -s 2>/dev/null; then
+    echo "Valid Kerberos tickets already exist for $(klist | grep 'Default principal' | cut -d: -f2 | tr -d ' ')"
+    exit 0
+fi
+
+# Prompt for password and authenticate
+echo "Authenticating $USERNAME@$REALM..."
+kinit $USERNAME@$REALM
+
+if [ $? -eq 0 ]; then
+    echo "Authentication successful!"
+    echo "Current tickets:"
+    klist
+else
+    echo "Authentication failed!"
+    exit 1
+fi
+Step 2: Make Script Executable
+
+chmod +x /usr/local/bin/kerberos-login.sh
+Step 3: Test the Login Script
+
+/usr/local/bin/kerberos-login.sh testuser1
+Subtask 3.3: Configure Automatic Ticket Renewal
+Step 1: Create Ticket Renewal Script
+
+vi /usr/local/bin/kerberos-renew.sh
+Add the following content:
+
+#!/bin/bash
+
+# Kerberos Ticket Renewal Script
+
+# Check if tickets exist and are renewable
+if klist -s 2>/dev/null; then
+    # Try to renew tickets
+    kinit -R 2>/dev/null
+    
+    if [ $? -eq 0 ]; then
+        echo "$(date): Kerberos tickets renewed successfully" >> /var/log/kerberos-renew.log
+    else
+        echo "$(date): Failed to renew Kerberos tickets" >> /var/log/kerberos-renew.log
+    fi
+else
+    echo "$(date): No valid Kerberos tickets found" >> /var/log/kerberos-renew.log
+fi
+Step 2: Make Renewal Script Executable
+
+chmod +x /usr/local/bin/kerberos-renew.sh
+Step 3: Configure Cron Job for Automatic Renewal
+
+Add a cron job to automatically renew tickets:
+
+crontab -e
+Add the following line to run every hour:
+
+0 * * * * /usr/local/bin/kerberos-renew.sh
+Subtask 3.4: Configure Desktop Environment Integration
+Step 1: Create Desktop Login Script
+
+For systems with desktop environments, create a login script:
+
+vi /etc/profile.d/kerberos-sso.sh
+Add the following content:
+
+#!/bin/bash
+
+# Kerberos SSO Profile Script
+
+# Function to check and obtain Kerberos tickets
+kerberos_sso_check() {
+    if ! klist -s 2>/dev/null; then
+        echo "No valid Kerberos tickets found."
+        echo "Please run: kinit <username>@EXAMPLE.COM"
+    else
+        echo "Valid Kerberos tickets found:"
+        klist | grep "Default principal"
+    fi
+}
+
+# Create alias for easy ticket checking
+alias kcheck='kerberos_sso_check'
+alias klogin='/usr/local/bin/kerberos-login.sh'
+Step 2: Make Profile Script Executable
+
+chmod +x /etc/profile.d/kerberos-sso.sh
+Step 3: Test Profile Integration
+
+Log out and log back in, then test:
+
+kcheck
+Verification and Testing
+Complete SSO Testing Procedure
+Step 1: Full Authentication Test
+
+On client1, perform a complete authentication test:
+
+# Clear any existing tickets
+kdestroy
+
+# Authenticate
+kinit ssouser@EXAMPLE.COM
+
+# Verify tickets
+klist -f
+
+# Test ticket information
+klist -e
+Step 2: Cross-Client SSO Test
+
+Test SSO functionality across clients:
+
+# On client1
+kinit testuser1@EXAMPLE.COM
+
+# On client2 (should work without re-authentication if properly configured)
+klist
+Step 3: Service Authentication Test
+
+Test service ticket acquisition:
+
+# Request a service ticket
+kvno host/client1.example.com@EXAMPLE.COM
+
+# Verify service ticket
+klist
+Troubleshooting Common Issues
+Issue 1: Clock Synchronization
+Kerberos requires synchronized clocks. If authentication fails:
+
+# Check system time
+date
+
+# Synchronize with NTP (if available)
+ntpdate -s time.nist.gov
+
+# Or manually set time
+timedatectl set-time "2023-12-01 10:00:00"
+Issue 2: DNS Resolution Problems
+Ensure proper hostname resolution:
+
+# Test DNS resolution
+nslookup kdc-server.example.com
+
+# Check hosts file
+cat /etc/hosts
+
+# Test connectivity
+ping kdc-server.example.com
+Issue 3: Firewall Blocking
+Check firewall settings:
+
+# Check firewall status
+firewall-cmd --list-all
+
+# Test port connectivity
+telnet kdc-server.example.com 88
+Issue 4: Permission Problems
+Check file permissions:
+
+# Check krb5.conf permissions
+ls -la /etc/krb5.conf
+
+# Check ticket cache permissions
+ls -la /tmp/krb5cc_*
+Security Best Practices
+Secure Configuration Guidelines
+Use Strong Encryption: Ensure AES encryption is enabled
+Regular Password Changes: Implement password rotation policies
+Ticket Lifetime Management: Configure appropriate ticket lifetimes
+Secure Key Storage: Protect keytab files with proper permissions
+Network Security: Use encrypted connections where possible
+Monitoring and Logging
+Step 1: Enable Detailed Logging
+
+Edit krb5.conf to enable comprehensive logging:
+
+vi /etc/krb5.conf
+Ensure logging section includes:
+
+[logging]
+ default = FILE:/var/log/krb5libs.log
+ kdc = FILE:/var/log/krb5kdc.log
+ admin_server = FILE:/var/log/kadmind.log
+Step 2: Monitor Authentication Logs
+
+# Monitor KDC logs
+tail -f /var/log/krb5kdc.log
+
+# Monitor client authentication
+tail -f /var/log/secure
+Conclusion
+In this comprehensive lab, you have successfully:
+
+Configured a complete Kerberos infrastructure including KDC server setup, database initialization, and client configuration
+Implemented Single Sign-On functionality allowing users to authenticate once and access multiple services
+Mastered Kerberos command-line tools including kinit for authentication and klist for ticket management
+Automated SSO processes through custom scripts and system integration
+Established security best practices for enterprise-grade authentication systems
+Why This Matters
+Kerberos SSO is fundamental to modern enterprise security because it:
+
+Enhances Security: Eliminates password transmission over networks
+Improves User Experience: Users authenticate once per session
+Enables Centralized Management: Single point of authentication control
+Supports Scalability: Efficiently handles large user populations
+Provides Audit Trails: Comprehensive logging for security compliance
+Next Steps
+To further develop your Kerberos expertise:
+
+Explore integration with LDAP directories
+Implement cross-realm authentication
+Configure Kerberos with web applications
+Study advanced security hardening techniques
+Practice troubleshooting complex authentication scenarios
+This lab provides the foundation for the Red Hat Certified Specialist in Identity Management exam and real-world enterprise authentication deployments.
