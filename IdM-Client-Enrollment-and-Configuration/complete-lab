@@ -1,0 +1,277 @@
+Lab Material
+Lab 3: IdM Client Enrollment and Configuration
+Objectives
+By the end of this lab, students will be able to:
+
+Understand the fundamentals of Identity Management (IdM) client enrollment
+Successfully enroll a RHEL system as an IdM client using ipa-client-install
+Configure System Security Services Daemon (SSSD) for centralized authentication
+Implement Kerberos authentication for secure user access
+Verify authentication functionality using kinit command
+Troubleshoot common IdM client configuration issues
+Prerequisites
+Before starting this lab, students should have:
+
+Basic understanding of Linux command line operations
+Familiarity with RHEL/CentOS system administration
+Knowledge of network configuration concepts
+Understanding of DNS resolution and hostname configuration
+Basic knowledge of authentication concepts (users, groups, passwords)
+Access to a functioning IdM server (covered in previous labs)
+Lab Environment Setup
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines for this lab. Simply click Start Lab to access your environment - no need to build your own virtual machines or configure complex networking.
+
+Your lab environment includes:
+
+IdM Server: Pre-configured FreeIPA server (ipa-server.example.com)
+Client Machine: RHEL 8/9 system ready for enrollment (client.example.com)
+Network Configuration: Proper DNS resolution and connectivity between systems
+Task 1: Prepare the Client System for IdM Enrollment
+Subtask 1.1: Verify Network Connectivity and DNS Resolution
+First, we need to ensure the client system can communicate with the IdM server and resolve DNS names properly.
+
+Check network connectivity to IdM server:
+ping -c 4 ipa-server.example.com
+Verify DNS resolution:
+nslookup ipa-server.example.com
+dig ipa-server.example.com
+Check reverse DNS lookup:
+nslookup 192.168.1.10
+Replace 192.168.1.10 with your IdM server's IP address
+
+Verify the client's hostname configuration:
+hostname -f
+hostnamectl status
+Subtask 1.2: Configure System Prerequisites
+Update the system packages:
+sudo dnf update -y
+Install required packages for IdM client:
+sudo dnf install -y ipa-client sssd-tools krb5-workstation
+Configure the system timezone (should match IdM server):
+sudo timedatectl set-timezone America/New_York
+timedatectl status
+Ensure NTP synchronization:
+sudo systemctl enable chronyd
+sudo systemctl start chronyd
+chrony sources -v
+Subtask 1.3: Configure DNS Settings
+Edit the DNS configuration:
+sudo vi /etc/resolv.conf
+Add the IdM server as the primary DNS server:
+nameserver 192.168.1.10
+search example.com
+Replace 192.168.1.10 with your IdM server's IP address
+
+Make DNS configuration persistent (for NetworkManager):
+sudo nmcli connection modify "System eth0" ipv4.dns "192.168.1.10"
+sudo nmcli connection modify "System eth0" ipv4.dns-search "example.com"
+sudo nmcli connection up "System eth0"
+Task 2: Enroll RHEL Client System Using ipa-client-install
+Subtask 2.1: Discover IdM Server Information
+Test IdM server discovery:
+ipa-client-install --discovery-autodiscovery
+Manual discovery if autodiscovery fails:
+ipa-client-install --server=ipa-server.example.com --domain=example.com --realm=EXAMPLE.COM --discovery
+Subtask 2.2: Perform Client Enrollment
+Run the interactive client installation:
+sudo ipa-client-install --hostname=client.example.com --mkhomedir
+Follow the interactive prompts:
+
+Continue to configure the system with these values? Type yes
+User authorized to enroll computers: Enter admin
+Password for admin@EXAMPLE.COM: Enter the admin password
+Alternative non-interactive installation:
+
+sudo ipa-client-install \
+  --hostname=client.example.com \
+  --server=ipa-server.example.com \
+  --domain=example.com \
+  --realm=EXAMPLE.COM \
+  --principal=admin \
+  --password=YourAdminPassword \
+  --mkhomedir \
+  --unattended
+Subtask 2.3: Verify Client Enrollment
+Check the enrollment status:
+sudo ipa-client-install --uninstall --dry-run
+Verify Kerberos configuration:
+cat /etc/krb5.conf
+Check SSSD configuration:
+sudo cat /etc/sssd/sssd.conf
+Verify client certificate:
+sudo ls -la /etc/ipa/
+sudo ipa-getcert list
+Task 3: Configure SSSD for Kerberos Authentication
+Subtask 3.1: Examine SSSD Configuration
+Review the default SSSD configuration:
+sudo cat /etc/sssd/sssd.conf
+Understanding key SSSD parameters:
+id_provider: Specifies identity information source
+auth_provider: Defines authentication method
+chpass_provider: Password change provider
+cache_credentials: Enables offline authentication
+Subtask 3.2: Customize SSSD Configuration
+Create a backup of the original configuration:
+sudo cp /etc/sssd/sssd.conf /etc/sssd/sssd.conf.backup
+Edit SSSD configuration for enhanced security:
+sudo vi /etc/sssd/sssd.conf
+Add or modify the following sections:
+[sssd]
+config_file_version = 2
+services = nss, pam, ssh, sudo
+domains = example.com
+
+[domain/example.com]
+id_provider = ipa
+auth_provider = ipa
+access_provider = ipa
+chpass_provider = ipa
+ipa_server = ipa-server.example.com
+ipa_domain = example.com
+ipa_hostname = client.example.com
+cache_credentials = True
+krb5_store_password_if_offline = True
+ldap_tls_cacert = /etc/ipa/ca.crt
+
+[nss]
+homedir_substring = /home
+
+[pam]
+offline_credentials_expiration = 0
+
+[sudo]
+
+[ssh]
+Subtask 3.3: Configure PAM for Home Directory Creation
+Enable automatic home directory creation:
+sudo authselect select sssd with-mkhomedir --force
+Verify PAM configuration:
+sudo authselect current
+Alternative manual PAM configuration:
+sudo vi /etc/pam.d/system-auth
+Add the following line after the pam_unix.so line:
+
+session optional pam_mkhomedir.so skel=/etc/skel umask=077
+Subtask 3.4: Restart and Enable SSSD Services
+Restart SSSD service:
+sudo systemctl restart sssd
+Enable SSSD to start at boot:
+sudo systemctl enable sssd
+Check SSSD service status:
+sudo systemctl status sssd
+Verify SSSD is running properly:
+sudo sssctl status
+Task 4: Verify Kerberos Authentication Using kinit
+Subtask 4.1: Test Kerberos Authentication
+Initialize Kerberos credentials for admin user:
+kinit admin
+Enter the admin password when prompted
+
+List current Kerberos tickets:
+klist
+Verify ticket details:
+klist -v
+Subtask 4.2: Test User Authentication
+Create a test user on the IdM server (if not already created):
+ipa user-add testuser --first=Test --last=User --password
+Test authentication with the new user:
+kinit testuser@EXAMPLE.COM
+Verify the user can obtain tickets:
+klist
+Test SSH login with Kerberos:
+ssh testuser@client.example.com
+Subtask 4.3: Test SSSD User Resolution
+Test user information retrieval:
+id testuser
+getent passwd testuser
+Test group information:
+getent group
+groups testuser
+Test sudo access (if configured):
+sudo -u testuser whoami
+Subtask 4.4: Verify Offline Authentication
+Cache user credentials:
+su - testuser
+exit
+Simulate network disconnection (optional):
+sudo systemctl stop NetworkManager
+Test offline authentication:
+su - testuser
+Restore network connection:
+sudo systemctl start NetworkManager
+Troubleshooting Common Issues
+DNS Resolution Problems
+Issue: Client cannot resolve IdM server hostname Solution:
+
+# Check DNS configuration
+cat /etc/resolv.conf
+# Test DNS resolution
+nslookup ipa-server.example.com
+# Restart NetworkManager
+sudo systemctl restart NetworkManager
+Time Synchronization Issues
+Issue: Kerberos authentication fails due to time skew Solution:
+
+# Check time synchronization
+timedatectl status
+# Synchronize time manually
+sudo chronyd -q 'server ipa-server.example.com iburst'
+# Restart chronyd
+sudo systemctl restart chronyd
+SSSD Service Issues
+Issue: SSSD fails to start or authenticate users Solution:
+
+# Check SSSD logs
+sudo tail -f /var/log/sssd/sssd.log
+# Clear SSSD cache
+sudo sss_cache -E
+# Restart SSSD
+sudo systemctl restart sssd
+Certificate Problems
+Issue: SSL/TLS certificate verification fails Solution:
+
+# Check certificate status
+sudo ipa-getcert list
+# Refresh certificates
+sudo ipa-getcert resubmit -i <request-id>
+# Verify CA certificate
+openssl x509 -in /etc/ipa/ca.crt -text -noout
+Verification Commands Summary
+Use these commands to verify your lab completion:
+
+# Verify client enrollment
+sudo ipa-client-install --uninstall --dry-run
+
+# Check Kerberos configuration
+klist
+kinit admin
+
+# Test user resolution
+getent passwd testuser
+id testuser
+
+# Verify SSSD status
+sudo systemctl status sssd
+sudo sssctl status
+
+# Test authentication
+ssh testuser@localhost
+Conclusion
+In this lab, you have successfully:
+
+Enrolled a RHEL client system into an Identity Management domain using ipa-client-install
+Configured SSSD for centralized authentication and user information retrieval
+Implemented Kerberos authentication for secure, single sign-on access
+Verified the authentication system using kinit and various testing methods
+Why This Matters:
+
+Identity Management client enrollment is crucial for enterprise environments because it:
+
+Centralizes user authentication across multiple systems
+Enhances security through Kerberos single sign-on
+Simplifies user management by eliminating local user accounts
+Enables policy enforcement across the entire infrastructure
+Provides audit trails for compliance requirements
+This knowledge is essential for the Red Hat Certified Specialist in Identity Management exam and real-world enterprise system administration. You now have the skills to integrate RHEL systems into centralized identity management infrastructures, which is a critical capability for modern IT environments.
+
+The configuration you've implemented provides a foundation for advanced IdM features like host-based access control, sudo rules, and certificate management, making your systems more secure and manageable at scale.
