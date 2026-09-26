@@ -1,0 +1,326 @@
+Lab Material
+Lab 12: Trust Establishment with Active Directory
+Objectives
+By the end of this lab, students will be able to:
+
+Understand the concept of cross-domain trust between IdM and Active Directory
+Configure and establish trust relationships using the ipa trust-add command
+Verify trust status and configure trust settings appropriately
+Test and validate cross-domain authentication between IdM and AD environments
+Troubleshoot common trust establishment issues
+Implement secure cross-domain user access controls
+Prerequisites
+Before starting this lab, students should have:
+
+Basic understanding of Linux command line operations
+Familiarity with Red Hat Identity Management (IdM) concepts
+Knowledge of Active Directory fundamentals
+Understanding of DNS configuration and Kerberos authentication
+Completion of previous IdM labs or equivalent experience
+Basic networking concepts including firewall configuration
+Lab Environment Setup
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines for this lab. Simply click Start Lab to access your environment - no need to build your own virtual machines.
+
+Your lab environment includes:
+
+IdM Server: RHEL 8/9 with FreeIPA installed and configured
+AD Server: Windows Server with Active Directory Domain Services
+Client Machine: RHEL 8/9 for testing cross-domain authentication
+Pre-configured DNS and network connectivity between all systems
+Task 1: Configure Cross-Domain Trust with ipa trust-add
+Subtask 1.1: Verify IdM Environment Prerequisites
+First, let's ensure our IdM environment is properly configured for trust establishment.
+
+Connect to your IdM server and verify the current status:
+# Check IdM server status
+sudo ipactl status
+
+# Verify DNS configuration
+sudo ipa dnszone-show example.com
+
+# Check current realm information
+sudo ipa config-show | grep -i realm
+Install required trust packages if not already present:
+# Install trust-related packages
+sudo dnf install -y ipa-server-trust-ad samba-client
+
+# Restart IdM services after package installation
+sudo ipactl restart
+Verify Kerberos configuration:
+# Check Kerberos realm configuration
+sudo cat /etc/krb5.conf
+
+# Test Kerberos authentication
+sudo kinit admin
+sudo klist
+Subtask 1.2: Prepare Active Directory Environment
+Before establishing trust, ensure the AD environment is ready.
+
+Verify AD domain information (perform on AD server):
+# Check AD domain details
+Get-ADDomain
+
+# Verify DNS settings
+nslookup example.com
+nslookup ad.example.com
+Create a trust user account in Active Directory:
+# Create trust administrator account
+New-ADUser -Name "trustadmin" -UserPrincipalName "trustadmin@ad.example.com" -AccountPassword (ConvertTo-SecureString "TrustPass123!" -AsPlainText -Force) -Enabled $true
+
+# Add to Domain Admins group
+Add-ADGroupMember -Identity "Domain Admins" -Members "trustadmin"
+Subtask 1.3: Configure DNS for Trust Relationship
+Proper DNS configuration is crucial for trust establishment.
+
+Configure DNS forwarders on IdM server:
+# Add DNS forwarder for AD domain
+sudo ipa dnsforwardzone-add ad.example.com --forwarder=192.168.1.100 --forward-policy=only
+
+# Verify DNS resolution
+nslookup ad.example.com
+nslookup _ldap._tcp.ad.example.com
+Test DNS resolution from both directions:
+# From IdM server, test AD DNS resolution
+dig @192.168.1.100 ad.example.com
+dig @192.168.1.100 _kerberos._tcp.ad.example.com SRV
+
+# Verify reverse DNS
+dig -x 192.168.1.100
+Subtask 1.4: Establish Trust Using ipa trust-add
+Now we'll create the actual trust relationship between IdM and AD.
+
+Authenticate as IdM administrator:
+# Obtain Kerberos ticket for admin user
+sudo kinit admin
+Add the trust relationship:
+# Establish one-way trust with AD domain
+sudo ipa trust-add ad.example.com --type=ad --admin=trustadmin --password
+
+# You will be prompted for the AD administrator password
+# Enter: TrustPass123!
+Configure trust for two-way authentication (if required):
+# Enable two-way trust
+sudo ipa trust-mod ad.example.com --trust-type=bidirectional
+Verify trust creation:
+# List all configured trusts
+sudo ipa trust-show ad.example.com
+
+# Check trust status
+sudo ipa trustdomain-find ad.example.com
+Task 2: Verify Trust Status and Configure Trust Settings
+Subtask 2.1: Validate Trust Establishment
+Let's verify that the trust relationship is working correctly.
+
+Check trust connectivity:
+# Test trust connectivity
+sudo ipa trust-fetch-domains ad.example.com
+
+# Verify domain controller connectivity
+sudo sss_cache -E
+sudo systemctl restart sssd
+Examine trust details:
+# Display comprehensive trust information
+sudo ipa trust-show ad.example.com --all
+
+# Check trust domain information
+sudo ipa trustdomain-show ad.example.com
+Validate Kerberos trust:
+# Test Kerberos cross-realm authentication
+sudo kinit administrator@AD.EXAMPLE.COM
+
+# Verify ticket-granting ticket
+sudo klist
+Subtask 2.2: Configure ID Ranges for Trust
+Proper ID range configuration ensures unique user and group IDs across domains.
+
+View current ID ranges:
+# List all ID ranges
+sudo ipa idrange-find
+
+# Show specific trust ID range
+sudo ipa idrange-show AD.EXAMPLE.COM_id_range
+Modify ID range if necessary:
+# Modify ID range base (if conflicts exist)
+sudo ipa idrange-mod AD.EXAMPLE.COM_id_range --base-id=1200000 --range-size=200000
+Configure default shell and home directory:
+# Set default shell for AD users
+sudo ipa config-mod --defaultshell=/bin/bash
+
+# Configure home directory template
+sudo ipa config-mod --homedirectory=/home/%u
+Subtask 2.3: Configure SSSD for Trust Integration
+SSSD must be properly configured to handle cross-domain authentication.
+
+Update SSSD configuration:
+# Backup current SSSD configuration
+sudo cp /etc/sssd/sssd.conf /etc/sssd/sssd.conf.backup
+
+# Edit SSSD configuration
+sudo vi /etc/sssd/sssd.conf
+Add trust-specific configuration:
+[domain/example.com]
+# Existing configuration...
+subdomain_inherit = parent_id
+subdomain_homedir = /home/%d/%u
+default_shell = /bin/bash
+krb5_store_password_if_offline = True
+cache_credentials = True
+krb5_realm = EXAMPLE.COM
+Restart and verify SSSD:
+# Restart SSSD service
+sudo systemctl restart sssd
+
+# Clear SSSD cache
+sudo sss_cache -E
+
+# Verify SSSD status
+sudo systemctl status sssd
+Task 3: Test Cross-Domain Logins Between IdM and AD
+Subtask 3.1: Test AD User Authentication on IdM Client
+Now we'll test whether AD users can authenticate on IdM-joined systems.
+
+Prepare the client system:
+# Ensure client is properly joined to IdM
+sudo ipa-client-install --unattended --principal=admin --password=AdminPass123
+
+# Verify client enrollment
+sudo ipa host-show client.example.com
+Test AD user lookup:
+# Look up AD user information
+getent passwd administrator@ad.example.com
+getent group "domain users@ad.example.com"
+
+# Test ID resolution
+id administrator@ad.example.com
+Attempt AD user login:
+# Test SSH login with AD credentials
+ssh administrator@ad.example.com@localhost
+
+# Alternative: Test local login
+sudo login
+# Username: administrator@ad.example.com
+# Password: [AD user password]
+Subtask 3.2: Configure and Test Group Mapping
+Group mapping allows AD groups to be used for authorization in IdM environment.
+
+Create external group mapping:
+# Create external group for AD Domain Admins
+sudo ipa group-add --desc="AD Domain Admins" ad_domain_admins --external
+
+# Add AD group to external group
+sudo ipa group-add-member ad_domain_admins --external="Domain Admins@ad.example.com"
+Create POSIX group and add external group:
+# Create POSIX group
+sudo ipa group-add --desc="Administrators" administrators
+
+# Add external group to POSIX group
+sudo ipa group-add-member administrators --groups=ad_domain_admins
+Test group membership:
+# Verify group membership for AD user
+groups administrator@ad.example.com
+
+# Check group information
+getent group administrators
+Subtask 3.3: Configure SUDO Rules for AD Users
+Enable AD users to use sudo privileges through IdM SUDO rules.
+
+Create SUDO rule for AD administrators:
+# Create SUDO rule
+sudo ipa sudorule-add --desc="AD Administrators SUDO" ad_admin_sudo
+
+# Add administrators group to SUDO rule
+sudo ipa sudorule-add-user ad_admin_sudo --groups=administrators
+
+# Add SUDO commands
+sudo ipa sudorule-add-allow-command ad_admin_sudo --sudocmds=ALL
+
+# Add target hosts
+sudo ipa sudorule-add-host ad_admin_sudo --hosts=client.example.com
+Test SUDO access:
+# Login as AD user and test sudo
+ssh administrator@ad.example.com@client.example.com
+sudo whoami
+sudo systemctl status sshd
+Subtask 3.4: Verify Cross-Domain Authentication Logs
+Monitor and verify authentication events in system logs.
+
+Check authentication logs:
+# Monitor secure log for authentication events
+sudo tail -f /var/log/secure
+
+# Check SSSD logs
+sudo tail -f /var/log/sssd/sssd_example.com.log
+
+# Review Kerberos logs
+sudo tail -f /var/log/krb5kdc.log
+Verify successful authentication events:
+# Search for successful AD user logins
+sudo grep "authentication.*ad.example.com" /var/log/secure
+
+# Check SSSD domain logs
+sudo grep -i "trust" /var/log/sssd/sssd_example.com.log
+Troubleshooting Common Issues
+DNS Resolution Problems
+If trust establishment fails due to DNS issues:
+
+# Verify DNS configuration
+sudo ipa dnsconfig-show
+
+# Test DNS resolution manually
+nslookup _kerberos._tcp.ad.example.com
+nslookup _ldap._tcp.ad.example.com
+
+# Restart DNS services
+sudo systemctl restart named-pkcs11
+Kerberos Authentication Failures
+For Kerberos-related trust issues:
+
+# Check Kerberos configuration
+sudo ipa-adtrust-install --add-sids
+
+# Verify time synchronization
+sudo chrony sources -v
+
+# Test cross-realm authentication
+sudo kinit -V administrator@AD.EXAMPLE.COM
+SSSD Cache Issues
+If user lookups fail:
+
+# Clear SSSD cache completely
+sudo sss_cache -E
+
+# Restart SSSD with debug logging
+sudo sssd -i -d 9
+
+# Check SSSD domain status
+sudo sssctl domain-status example.com
+Verification and Testing
+Complete Trust Verification Checklist
+Trust Status Verification:
+# Comprehensive trust check
+sudo ipa trust-show ad.example.com --all
+sudo ipa trustdomain-find ad.example.com
+sudo sssctl domain-list
+User Authentication Test:
+# Test multiple AD users
+getent passwd administrator@ad.example.com
+getent passwd testuser@ad.example.com
+id administrator@ad.example.com
+Group Membership Verification:
+# Verify group mappings
+groups administrator@ad.example.com
+getent group administrators
+sudo ipa group-show administrators --all
+Conclusion
+In this lab, you have successfully:
+
+Established a trust relationship between Red Hat Identity Management and Active Directory using the ipa trust-add command
+Configured DNS forwarders and verified proper name resolution between domains
+Verified trust status and configured appropriate trust settings including ID ranges and SSSD integration
+Tested cross-domain authentication by enabling AD users to log into IdM-managed systems
+Implemented group mapping to allow AD groups to be used for authorization in the IdM environment
+Configured SUDO rules for AD users through IdM group membership
+Monitored and troubleshot common trust-related issues
+This trust establishment enables organizations to maintain centralized identity management while allowing seamless integration between Linux and Windows environments. The skills learned in this lab are essential for enterprise environments where both IdM and Active Directory coexist, providing users with single sign-on capabilities across heterogeneous systems.
+
+Understanding trust relationships is crucial for the Red Hat Certified Specialist in Identity Management exam, as it demonstrates advanced IdM administration capabilities and real-world enterprise integration scenarios.
