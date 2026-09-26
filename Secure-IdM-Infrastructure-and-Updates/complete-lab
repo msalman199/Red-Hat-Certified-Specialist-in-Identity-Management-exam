@@ -1,0 +1,303 @@
+Video
+Lab Material
+Lab 18: Secure IdM Infrastructure and Updates
+Objectives
+By the end of this lab, students will be able to:
+
+Check for available updates in Red Hat Identity Management (IdM) infrastructure
+Apply security patches to IdM components safely
+Verify successful patch installations and service functionality
+Understand the importance of maintaining secure IdM environments
+Perform proper service restarts after applying updates
+Prerequisites
+Before starting this lab, students should have:
+
+Basic understanding of Linux command line operations
+Familiarity with Red Hat Identity Management concepts
+Knowledge of systemctl service management
+Understanding of package management with yum/dnf
+Basic networking concepts and DNS resolution
+Previous experience with IdM server administration
+Lab Environment
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines with IdM infrastructure already set up. Simply click Start Lab to access your environment - no need to build your own virtual machines or configure complex networking.
+
+Your lab environment includes:
+
+Red Hat Enterprise Linux 9 server with IdM server installed
+Pre-configured domain: lab.example.com
+Administrative access to the IdM server
+Network connectivity for package updates
+Task 1: Check for IdM Updates
+Subtask 1.1: Verify Current IdM Installation Status
+First, let's check the current status of your IdM installation and identify what components are installed.
+
+Connect to your IdM server and verify the current installation:
+# Check IdM server status
+sudo ipactl status
+
+# Display current IdM version
+sudo ipa --version
+
+# List installed IdM packages
+sudo rpm -qa | grep ipa-server | sort
+Document the current version for comparison after updates:
+# Create a baseline report
+echo "=== IdM Update Baseline Report ===" > /tmp/idm_baseline.txt
+echo "Date: $(date)" >> /tmp/idm_baseline.txt
+echo "Current IdM Version:" >> /tmp/idm_baseline.txt
+sudo ipa --version >> /tmp/idm_baseline.txt
+echo "Installed Packages:" >> /tmp/idm_baseline.txt
+sudo rpm -qa | grep ipa-server >> /tmp/idm_baseline.txt
+Subtask 1.2: Check for Available Updates Using ipa update
+The ipa update command is specifically designed to update IdM schema and configuration, not system packages.
+
+Run the IdM update command to check for schema and configuration updates:
+# Perform IdM schema and configuration update
+sudo ipa-ldap-updater --upgrade
+
+# Check for any pending IdM updates
+sudo ipa-server-upgrade --dry-run
+Verify the update process completed successfully:
+# Check IdM server status after update
+sudo ipactl status
+
+# Verify no errors in IdM logs
+sudo tail -20 /var/log/ipaserver-install.log
+Subtask 1.3: Check for System Package Updates
+Now let's check for available system updates that affect IdM components.
+
+Check for available package updates:
+# Update package cache
+sudo dnf makecache
+
+# Check for updates to IdM-related packages
+sudo dnf list updates | grep -E "(ipa-|389-ds|krb5|bind)"
+
+# Check for all available security updates
+sudo dnf updateinfo list security
+Generate an update report:
+# Create detailed update report
+echo "=== Available Updates Report ===" > /tmp/available_updates.txt
+echo "Date: $(date)" >> /tmp/available_updates.txt
+echo "IdM-related updates:" >> /tmp/available_updates.txt
+sudo dnf list updates | grep -E "(ipa-|389-ds|krb5|bind)" >> /tmp/available_updates.txt
+echo "Security updates:" >> /tmp/available_updates.txt
+sudo dnf updateinfo list security >> /tmp/available_updates.txt
+Task 2: Apply Security Patches to IdM Components
+Subtask 2.1: Prepare for Updates
+Before applying updates, it's crucial to prepare the system and create backups.
+
+Create a backup of critical IdM data:
+# Create backup directory
+sudo mkdir -p /backup/idm/$(date +%Y%m%d)
+
+# Backup IdM configuration
+sudo ipa-backup --data --online /backup/idm/$(date +%Y%m%d)/
+
+# Backup critical configuration files
+sudo cp -r /etc/ipa /backup/idm/$(date +%Y%m%d)/etc-ipa-backup
+sudo cp -r /etc/dirsrv /backup/idm/$(date +%Y%m%d)/etc-dirsrv-backup
+Stop IdM services safely:
+# Stop IdM services in proper order
+sudo ipactl stop
+
+# Verify all services are stopped
+sudo ipactl status
+Subtask 2.2: Apply Security Updates
+Now we'll apply the security patches to IdM components.
+
+Apply security updates only:
+# Apply only security updates
+sudo dnf update --security -y
+
+# If you need to update specific IdM packages
+sudo dnf update ipa-server ipa-client 389-ds-base krb5-server bind-dyndb-ldap -y
+Monitor the update process:
+# Check update logs
+sudo tail -f /var/log/dnf.log &
+
+# Wait for updates to complete, then stop monitoring
+# Press Ctrl+C to stop tail command
+Subtask 2.3: Apply IdM-Specific Updates
+After system packages are updated, apply IdM-specific configuration updates.
+
+Run IdM server upgrade:
+# Perform IdM server upgrade
+sudo ipa-server-upgrade
+
+# Check for any upgrade errors
+echo $?
+Update IdM schema if needed:
+# Run LDAP updater to apply schema changes
+sudo ipa-ldap-updater --upgrade
+
+# Verify schema update completed successfully
+sudo grep -i "upgrade" /var/log/ipaupgrade.log | tail -10
+Task 3: Verify Patch Installations and Service Restarts
+Subtask 3.1: Verify Package Updates
+Let's confirm that the updates were applied successfully.
+
+Check updated package versions:
+# Compare current versions with baseline
+echo "=== Post-Update Package Versions ===" > /tmp/post_update_report.txt
+echo "Date: $(date)" >> /tmp/post_update_report.txt
+echo "Updated IdM Version:" >> /tmp/post_update_report.txt
+sudo ipa --version >> /tmp/post_update_report.txt
+echo "Updated Packages:" >> /tmp/post_update_report.txt
+sudo rpm -qa | grep ipa-server >> /tmp/post_update_report.txt
+
+# Display the comparison
+echo "=== UPDATE COMPARISON ==="
+echo "BEFORE:"
+cat /tmp/idm_baseline.txt
+echo "AFTER:"
+cat /tmp/post_update_report.txt
+Verify security patches were applied:
+# Check what security updates were installed
+sudo dnf history info | head -20
+
+# List recently updated packages
+sudo rpm -qa --last | head -10
+Subtask 3.2: Restart and Verify IdM Services
+Now we need to restart IdM services and verify they're working correctly.
+
+Start IdM services:
+# Start all IdM services
+sudo ipactl start
+
+# Wait for services to fully initialize
+sleep 30
+
+# Check service status
+sudo ipactl status
+Verify service functionality:
+# Test IdM functionality
+sudo ipa user-find admin
+
+# Check DNS resolution
+nslookup $(hostname) 127.0.0.1
+
+# Verify Kerberos authentication
+sudo kinit admin
+sudo klist
+Subtask 3.3: Perform Comprehensive Health Checks
+Let's run comprehensive tests to ensure everything is working properly.
+
+Run IdM health checks:
+# Check IdM server health
+sudo ipa-healthcheck --source=ipahealthcheck.ipa
+
+# Check specific components
+sudo ipa-healthcheck --source=ipahealthcheck.ipa.certs
+sudo ipa-healthcheck --source=ipahealthcheck.ipa.dna
+sudo ipa-healthcheck --source=ipahealthcheck.ipa.idns
+Test critical IdM functions:
+# Test user management
+sudo ipa user-add testuser --first=Test --last=User --password
+
+# Test group management
+sudo ipa group-add testgroup --desc="Test group for verification"
+
+# Test DNS functionality
+sudo ipa dnsrecord-find lab.example.com
+
+# Clean up test objects
+sudo ipa user-del testuser
+sudo ipa group-del testgroup
+Subtask 3.4: Monitor System Logs
+Check system logs to ensure no errors occurred during the update process.
+
+Review IdM-related logs:
+# Check IdM server logs
+sudo tail -50 /var/log/ipaserver-install.log
+
+# Check upgrade logs
+sudo tail -50 /var/log/ipaupgrade.log
+
+# Check for any error messages
+sudo grep -i error /var/log/ipaserver-install.log | tail -10
+Check system logs for issues:
+# Check systemd journal for IdM services
+sudo journalctl -u ipa -n 50
+
+# Check for any critical system messages
+sudo journalctl --priority=err --since="1 hour ago"
+Subtask 3.5: Create Final Verification Report
+Document the successful completion of updates and verification.
+
+Generate final status report:
+# Create comprehensive final report
+cat > /tmp/final_update_report.txt << EOF
+=== IdM Update Completion Report ===
+Date: $(date)
+Update Status: COMPLETED
+
+Current IdM Version:
+$(sudo ipa --version)
+
+Service Status:
+$(sudo ipactl status)
+
+Recent Package Updates:
+$(sudo rpm -qa --last | head -5)
+
+Health Check Summary:
+$(sudo ipa-healthcheck --source=ipahealthcheck.ipa --output-type=human | grep -E "(SUCCESS|ERROR|WARNING)" | head -10)
+
+=== End Report ===
+EOF
+
+# Display the final report
+cat /tmp/final_update_report.txt
+Verify all objectives completed:
+# Final verification checklist
+echo "=== VERIFICATION CHECKLIST ==="
+echo "✓ IdM updates checked and applied"
+echo "✓ Security patches installed"
+echo "✓ Services restarted successfully"
+echo "✓ Health checks passed"
+echo "✓ Functionality verified"
+echo "✓ Logs reviewed for errors"
+echo "Update process completed successfully!"
+Troubleshooting Tips
+Common Issues and Solutions
+Issue 1: Services fail to start after update
+
+# Check service dependencies
+sudo systemctl list-dependencies ipa
+
+# Restart services individually
+sudo systemctl restart dirsrv@LAB-EXAMPLE-COM.service
+sudo systemctl restart krb5kdc.service
+sudo systemctl restart kadmin.service
+Issue 2: Schema update failures
+
+# Check LDAP server status
+sudo systemctl status dirsrv@LAB-EXAMPLE-COM
+
+# Manually run schema update with verbose output
+sudo ipa-ldap-updater --upgrade --verbose
+Issue 3: DNS resolution problems
+
+# Restart DNS service
+sudo systemctl restart named-pkcs11
+
+# Check DNS configuration
+sudo named-checkconf /etc/named.conf
+Conclusion
+In this lab, you have successfully:
+
+Checked for IdM updates using both ipa update commands and system package management tools
+Applied security patches to IdM infrastructure components while maintaining system integrity
+Verified patch installations and ensured all services restarted properly
+Performed comprehensive health checks to confirm IdM functionality
+Why This Matters: Keeping IdM infrastructure updated is critical for maintaining security, stability, and compliance in enterprise environments. Regular updates protect against vulnerabilities, improve performance, and ensure compatibility with other systems. The systematic approach you've learned ensures minimal downtime and reduces the risk of service disruption during maintenance windows.
+
+Key Takeaways:
+
+Always backup before applying updates
+Use IdM-specific tools for schema and configuration updates
+Verify functionality after updates with comprehensive testing
+Monitor logs to catch and resolve issues quickly
+Document the update process for compliance and troubleshooting
+This knowledge prepares you for real-world IdM administration and supports your preparation for the Red Hat Certified Specialist in Identity Management exam.
