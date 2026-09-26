@@ -1,0 +1,409 @@
+Lab 11: Managing Authentication Indicators (OTP)
+Objectives
+By the end of this lab, students will be able to:
+
+Understand the fundamentals of One-Time Password (OTP) authentication
+Install and configure OTP tokens using FreeIPA's ipa otptoken-add command
+Enroll users for OTP-based two-factor authentication
+Test and validate OTP functionality during user login
+Troubleshoot common OTP authentication issues
+Implement secure authentication practices in enterprise environments
+Prerequisites
+Before starting this lab, students should have:
+
+Basic understanding of Linux command-line operations
+Familiarity with user management concepts
+Knowledge of authentication and authorization principles
+Understanding of two-factor authentication concepts
+Basic networking knowledge
+Experience with FreeIPA or similar identity management systems
+Technical Requirements:
+
+Access to a Linux-based system with FreeIPA installed
+Administrative privileges on the FreeIPA server
+A smartphone or OTP application (Google Authenticator, FreeOTP, etc.)
+Network connectivity for testing
+Ready-to-Use Cloud Machines
+Good news! Al Nafi provides pre-configured Linux-based cloud machines with FreeIPA already installed and configured. Simply click Start Lab to access your environment. No need to build your own virtual machine or install software from scratch.
+
+Your lab environment includes:
+
+CentOS/RHEL 8 or 9 with FreeIPA server configured
+Pre-configured domain and administrative user
+All necessary packages and dependencies installed
+Network connectivity for testing OTP functionality
+Lab Environment Setup
+Initial Environment Verification
+Before proceeding with OTP configuration, let's verify our FreeIPA environment is ready.
+
+Step 1: Verify FreeIPA Status
+
+# Check if FreeIPA services are running
+sudo systemctl status ipa
+
+# Verify FreeIPA server status
+sudo ipactl status
+Step 2: Authenticate as Administrator
+
+# Obtain Kerberos ticket for admin user
+kinit admin
+
+# Verify authentication
+klist
+Step 3: Check Current Domain Information
+
+# Display IPA server information
+ipa config-show
+
+# List existing users
+ipa user-find
+Task 1: Install and Configure OTP using ipa otptoken-add
+Subtask 1.1: Understanding OTP Token Types
+FreeIPA supports two main types of OTP tokens:
+
+HOTP (HMAC-based One-Time Password): Counter-based tokens
+TOTP (Time-based One-Time Password): Time-based tokens (most common)
+Subtask 1.2: Create a TOTP Token
+Step 1: Generate a Basic TOTP Token
+
+# Create a TOTP token for user testuser
+ipa otptoken-add --type=totp --desc="Test User Mobile Token"
+
+# The command will output a QR code and secret key
+# Save the secret key for manual entry if needed
+Step 2: Create a Named TOTP Token
+
+# Create a token with a specific identifier
+ipa otptoken-add testuser-mobile \
+  --type=totp \
+  --desc="Test User Mobile Device" \
+  --algo=sha1 \
+  --digits=6 \
+  --interval=30
+Expected Output:
+
+Added OTP token "testuser-mobile"
+  Unique ID: testuser-mobile
+  Type: TOTP
+  Description: Test User Mobile Device
+  Algorithm: sha1
+  Digits: 6
+  Clock interval: 30
+  URI: otpauth://totp/testuser@example.com?secret=ABCD...&issuer=example.com
+Subtask 1.3: Create an HOTP Token
+# Create an HOTP (counter-based) token
+ipa otptoken-add testuser-hotp \
+  --type=hotp \
+  --desc="Test User Hardware Token" \
+  --algo=sha1 \
+  --digits=6 \
+  --counter=1
+Subtask 1.4: View Token Information
+# List all OTP tokens
+ipa otptoken-find
+
+# Show specific token details
+ipa otptoken-show testuser-mobile
+
+# Display QR code for token (if needed again)
+ipa otptoken-show testuser-mobile --show-uri
+Task 2: Enroll a User for OTP
+Subtask 2.1: Create a Test User
+Step 1: Create a New User Account
+
+# Create a test user for OTP enrollment
+ipa user-add testuser \
+  --first=Test \
+  --last=User \
+  --email=testuser@example.com \
+  --password
+Step 2: Verify User Creation
+
+# Confirm user was created successfully
+ipa user-show testuser
+
+# Check user's authentication methods
+ipa user-show testuser --all
+Subtask 2.2: Assign OTP Token to User
+Step 1: Associate Token with User
+
+# Assign the TOTP token to the user
+ipa otptoken-mod testuser-mobile --owner=testuser
+
+# Verify token assignment
+ipa otptoken-show testuser-mobile
+Step 2: Configure User for Two-Factor Authentication
+
+# Enable two-factor authentication for the user
+ipa user-mod testuser --user-auth-type=otp
+
+# Verify the authentication type change
+ipa user-show testuser --all | grep "User authentication types"
+Subtask 2.3: Set Up Mobile Authenticator App
+Step 1: Install Authenticator App
+
+On your mobile device, install one of these OTP applications:
+
+Google Authenticator (iOS/Android)
+FreeOTP (iOS/Android) - Recommended for open-source preference
+Authy (iOS/Android)
+Microsoft Authenticator (iOS/Android)
+Step 2: Add Token to Authenticator App
+
+# Display the QR code and URI for easy setup
+ipa otptoken-show testuser-mobile --show-uri
+Manual Setup Process:
+
+Open your authenticator app
+Select "Add Account" or "+"
+Choose "Scan QR Code" or "Manual Entry"
+If using QR code: Scan the displayed code
+If manual entry: Enter the secret key shown in the URI
+Step 3: Verify Token Setup
+
+# Test the token generation (you'll need the current OTP from your app)
+# This is just to verify the token is working - actual testing comes in Task 3
+echo "Token setup complete. Current time-based code should match your app."
+date
+Subtask 2.4: Configure Backup Tokens (Optional)
+Step 1: Create Additional Tokens
+
+# Create a backup hardware token
+ipa otptoken-add testuser-backup \
+  --type=totp \
+  --desc="Test User Backup Token" \
+  --owner=testuser
+
+# Create emergency tokens
+ipa otptoken-add testuser-emergency \
+  --type=hotp \
+  --desc="Emergency Access Token" \
+  --owner=testuser
+Task 3: Test OTP Functionality During Login
+Subtask 3.1: Prepare for Testing
+Step 1: Set User Password
+
+# Ensure the test user has a password set
+ipa passwd testuser
+Step 2: Verify Current Authentication Requirements
+
+# Check authentication policy
+ipa pwpolicy-show
+
+# Verify user's authentication requirements
+ipa user-show testuser | grep -i auth
+Subtask 3.2: Test SSH Login with OTP
+Step 1: Configure SSH for OTP Authentication
+
+# Edit SSH daemon configuration
+sudo vi /etc/ssh/sshd_config
+
+# Add or modify these lines:
+# ChallengeResponseAuthentication yes
+# AuthenticationMethods publickey,keyboard-interactive:pam
+# UsePAM yes
+Step 2: Restart SSH Service
+
+# Restart SSH to apply changes
+sudo systemctl restart sshd
+
+# Verify SSH is running
+sudo systemctl status sshd
+Step 3: Test SSH Login
+
+# From another terminal or machine, attempt SSH login
+ssh testuser@localhost
+
+# You should be prompted for:
+# 1. Password
+# 2. OTP token (6-digit code from your authenticator app)
+Subtask 3.3: Test Web UI Login
+Step 1: Access FreeIPA Web Interface
+
+# Get the server's IP address
+ip addr show
+
+# Note: Access https://your-server-ip/ipa/ui in a web browser
+echo "Access the FreeIPA web interface at: https://$(hostname -f)/ipa/ui"
+Step 2: Perform Web Login Test
+
+Open web browser and navigate to FreeIPA web interface
+Enter username: testuser
+Enter password when prompted
+Enter current OTP code from your authenticator app
+Verify successful login
+Subtask 3.4: Test Command Line Authentication
+Step 1: Test Kerberos Authentication with OTP
+
+# Clear any existing tickets
+kdestroy
+
+# Attempt to get Kerberos ticket with OTP
+kinit testuser
+
+# You'll be prompted for password, then OTP
+# Enter your password first, then the 6-digit OTP code
+Step 2: Verify Authentication Success
+
+# Check if ticket was obtained
+klist
+
+# Test access to IPA commands
+ipa user-show testuser
+Subtask 3.5: Test Token Synchronization
+Step 1: Verify Time Synchronization
+
+# Check server time
+date
+
+# Ensure NTP is running for accurate time
+sudo systemctl status chronyd
+
+# Compare with your mobile device time
+echo "Ensure your mobile device time matches server time"
+Step 2: Test Multiple Login Attempts
+
+# Test several consecutive logins to verify token changes
+for i in {1..3}; do
+  echo "Test attempt $i - Use a fresh OTP code"
+  kdestroy
+  kinit testuser
+  sleep 35  # Wait for new TOTP code
+done
+Troubleshooting Common Issues
+Issue 1: Time Synchronization Problems
+Symptoms: OTP codes not working despite correct entry
+
+Solution:
+
+# Check time synchronization
+sudo chrony sources -v
+
+# Force time sync if needed
+sudo chrony makestep
+
+# Restart chronyd service
+sudo systemctl restart chronyd
+Issue 2: Token Not Associated with User
+Symptoms: User cannot use OTP for authentication
+
+Solution:
+
+# Verify token ownership
+ipa otptoken-find --owner=testuser
+
+# Re-assign token if necessary
+ipa otptoken-mod token-id --owner=testuser
+Issue 3: SSH Authentication Failing
+Symptoms: SSH not prompting for OTP
+
+Solution:
+
+# Check SSH configuration
+sudo sshd -T | grep -i challenge
+
+# Verify PAM configuration
+sudo cat /etc/pam.d/sshd | grep pam_sss
+
+# Check SSH logs
+sudo journalctl -u sshd -f
+Issue 4: Web Interface Not Accepting OTP
+Symptoms: Web login fails with correct credentials and OTP
+
+Solution:
+
+# Check IPA services
+sudo ipactl status
+
+# Restart IPA services if needed
+sudo ipactl restart
+
+# Check web server logs
+sudo journalctl -u httpd -f
+Advanced Configuration Options
+Custom Token Parameters
+# Create token with custom parameters
+ipa otptoken-add advanced-token \
+  --type=totp \
+  --desc="Advanced Configuration Token" \
+  --algo=sha256 \
+  --digits=8 \
+  --interval=60 \
+  --owner=testuser
+Bulk Token Management
+# Create multiple tokens for different users
+for user in user1 user2 user3; do
+  ipa otptoken-add ${user}-token \
+    --type=totp \
+    --desc="Token for $user" \
+    --owner=$user
+done
+Token Policies and Restrictions
+# Set token usage policies
+ipa otptoken-mod testuser-mobile \
+  --desc="Mobile token - restricted to business hours"
+
+# View all token policies
+ipa otptoken-find --all
+Security Best Practices
+Token Management Guidelines
+Regular Token Rotation
+
+# Disable old tokens
+ipa otptoken-del old-token-id
+
+# Create new tokens periodically
+ipa otptoken-add new-token --owner=user
+Monitor Token Usage
+
+# Check authentication logs
+sudo journalctl -u sssd -f | grep OTP
+
+# Monitor failed authentication attempts
+sudo tail -f /var/log/secure | grep authentication
+Backup and Recovery
+
+# Export token information (for backup)
+ipa otptoken-find --all > otp-tokens-backup.txt
+
+# Create emergency access tokens
+ipa otptoken-add emergency-$(date +%Y%m%d) --type=hotp
+Verification and Testing Checklist
+Pre-Deployment Checklist
+ FreeIPA server is running and accessible
+ Time synchronization is configured correctly
+ Test user account is created and configured
+ OTP token is generated and assigned to user
+ Mobile authenticator app is configured
+ SSH is configured for OTP authentication
+ Web interface is accessible and functional
+Post-Deployment Testing
+ User can authenticate via SSH with password + OTP
+ User can authenticate via web interface with password + OTP
+ Kerberos authentication works with OTP
+ Token codes change every 30 seconds (TOTP)
+ Failed authentication attempts are logged
+ Multiple consecutive authentications work correctly
+ Backup tokens function as expected
+Conclusion
+In this comprehensive lab, you have successfully:
+
+Implemented OTP Authentication: You learned how to configure One-Time Password authentication using FreeIPA's built-in OTP token management system, providing an additional layer of security beyond traditional password-based authentication.
+
+Configured Token Management: You mastered the use of ipa otptoken-add and related commands to create, configure, and manage both TOTP (time-based) and HOTP (counter-based) tokens for different use cases.
+
+Enrolled Users for Two-Factor Authentication: You successfully enrolled a test user for OTP authentication, configured their authentication requirements, and associated OTP tokens with their account.
+
+Tested Multiple Authentication Methods: You validated OTP functionality across different access methods including SSH, web interface, and command-line Kerberos authentication, ensuring comprehensive security coverage.
+
+Implemented Security Best Practices: You learned about token management, time synchronization, backup strategies, and monitoring techniques essential for maintaining a secure OTP implementation.
+
+Why This Matters:
+
+Two-factor authentication using OTP tokens significantly enhances security by requiring something the user knows (password) and something the user has (OTP device). This lab provides practical experience with enterprise-grade identity management tools that are essential for:
+
+Compliance Requirements: Many regulatory frameworks require multi-factor authentication
+Security Hardening: Protecting against password-based attacks and credential theft
+Enterprise Integration: Understanding how OTP fits into larger identity management ecosystems
+Career Development: Gaining hands-on experience with tools used in Red Hat Certified Specialist in Identity Management certification
+The skills you've developed in this lab are directly applicable to real-world enterprise environments where secure authentication is critical for protecting sensitive systems and data. You're now equipped to implement and manage OTP-based two-factor authentication in production environments using open-source tools.
