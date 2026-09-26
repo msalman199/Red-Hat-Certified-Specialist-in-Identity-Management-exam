@@ -1,0 +1,868 @@
+Lab 16: Automating Identity Management
+Objectives
+By the end of this lab, students will be able to:
+
+• Create Ansible playbooks to automate user and group creation in Identity Management (IdM) • Configure Host-Based Access Control (HBAC) and sudo rules using Ansible automation • Automate IdM server setup and client enrollment processes • Understand best practices for IdM automation and configuration management • Implement scalable identity management solutions using open-source tools
+
+Prerequisites
+Before starting this lab, students should have:
+
+• Basic understanding of Linux system administration • Familiarity with YAML syntax and Ansible fundamentals • Knowledge of Identity Management concepts (users, groups, authentication) • Experience with command-line interface operations • Understanding of SSH key-based authentication • Basic networking concepts (DNS, LDAP)
+
+Lab Environment
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines for this lab. Simply click Start Lab to access your environment - no need to build your own virtual machines or configure complex networking.
+
+Your lab environment includes: • idm-server: CentOS Stream 9 server for IdM installation • idm-client1: CentOS Stream 9 client for enrollment testing • ansible-control: CentOS Stream 9 with Ansible pre-installed
+
+Task 1: Create a Playbook to Automate User and Group Creation
+Subtask 1.1: Set Up Ansible Environment
+First, we'll prepare our Ansible control node and install necessary collections.
+
+Connect to the Ansible control node:
+ssh student@ansible-control
+Install required Ansible collections:
+ansible-galaxy collection install freeipa.ansible_freeipa
+ansible-galaxy collection install community.general
+Create the project directory structure:
+mkdir -p ~/idm-automation/{playbooks,inventory,group_vars,host_vars}
+cd ~/idm-automation
+Create the inventory file:
+cat > inventory/hosts.yml << 'EOF'
+all:
+  children:
+    idm_servers:
+      hosts:
+        idm-server:
+          ansible_host: 192.168.1.10
+          ansible_user: root
+    idm_clients:
+      hosts:
+        idm-client1:
+          ansible_host: 192.168.1.11
+          ansible_user: root
+    ansible_control:
+      hosts:
+        localhost:
+          ansible_connection: local
+EOF
+Subtask 1.2: Create User and Group Management Playbook
+Create the main playbook for user and group management:
+cat > playbooks/manage-users-groups.yml << 'EOF'
+---
+- name: Manage IdM Users and Groups
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ipaadmin_password: "RedHat123!"
+    ipaserver_hostname: "idm-server.example.com"
+    
+    # Define groups to create
+    idm_groups:
+      - name: developers
+        description: "Development team members"
+      - name: sysadmins
+        description: "System administrators"
+      - name: managers
+        description: "Management team"
+    
+    # Define users to create
+    idm_users:
+      - name: jdoe
+        first: John
+        last: Doe
+        email: jdoe@example.com
+        password: "TempPass123!"
+        groups:
+          - developers
+      - name: asmith
+        first: Alice
+        last: Smith
+        email: asmith@example.com
+        password: "TempPass123!"
+        groups:
+          - sysadmins
+          - developers
+      - name: bwilson
+        first: Bob
+        last: Wilson
+        email: bwilson@example.com
+        password: "TempPass123!"
+        groups:
+          - managers
+
+  tasks:
+    - name: Ensure IdM groups exist
+      freeipa.ansible_freeipa.ipagroup:
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.name }}"
+        description: "{{ item.description }}"
+        state: present
+      loop: "{{ idm_groups }}"
+      delegate_to: idm-server
+
+    - name: Ensure IdM users exist
+      freeipa.ansible_freeipa.ipauser:
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.name }}"
+        first: "{{ item.first }}"
+        last: "{{ item.last }}"
+        email: "{{ item.email }}"
+        password: "{{ item.password }}"
+        update_password: on_create
+        state: present
+      loop: "{{ idm_users }}"
+      delegate_to: idm-server
+
+    - name: Add users to groups
+      freeipa.ansible_freeipa.ipagroup:
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ group_item }}"
+        user: "{{ item.name }}"
+        action: member
+        state: present
+      loop: "{{ idm_users }}"
+      loop_control:
+        loop_var: item
+      with_subelements:
+        - "{{ idm_users }}"
+        - groups
+      loop_control:
+        loop_var: group_item
+      delegate_to: idm-server
+      vars:
+        group_item: "{{ item.1 }}"
+EOF
+Create a more advanced playbook with bulk user creation from CSV:
+cat > playbooks/bulk-user-creation.yml << 'EOF'
+---
+- name: Bulk User Creation from CSV
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ipaadmin_password: "RedHat123!"
+    csv_file: "/tmp/users.csv"
+
+  tasks:
+    - name: Create sample CSV file
+      copy:
+        content: |
+          username,firstname,lastname,email,department,title
+          mjohnson,Mike,Johnson,mjohnson@example.com,IT,Developer
+          slee,Sarah,Lee,slee@example.com,HR,Manager
+          dgarcia,David,Garcia,dgarcia@example.com,Finance,Analyst
+          kbrown,Karen,Brown,kbrown@example.com,IT,SysAdmin
+        dest: "{{ csv_file }}"
+
+    - name: Read CSV file
+      read_csv:
+        path: "{{ csv_file }}"
+      register: user_data
+
+    - name: Create department groups
+      freeipa.ansible_freeipa.ipagroup:
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.department | lower }}"
+        description: "{{ item.department }} Department"
+        state: present
+      loop: "{{ user_data.list }}"
+      delegate_to: idm-server
+      when: item.department is defined
+
+    - name: Create users from CSV
+      freeipa.ansible_freeipa.ipauser:
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.username }}"
+        first: "{{ item.firstname }}"
+        last: "{{ item.lastname }}"
+        email: "{{ item.email }}"
+        title: "{{ item.title | default('Employee') }}"
+        password: "Welcome123!"
+        update_password: on_create
+        state: present
+      loop: "{{ user_data.list }}"
+      delegate_to: idm-server
+
+    - name: Add users to department groups
+      freeipa.ansible_freeipa.ipagroup:
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.department | lower }}"
+        user: "{{ item.username }}"
+        action: member
+        state: present
+      loop: "{{ user_data.list }}"
+      delegate_to: idm-server
+      when: item.department is defined
+EOF
+Subtask 1.3: Test User and Group Creation
+Run the user and group management playbook:
+ansible-playbook -i inventory/hosts.yml playbooks/manage-users-groups.yml
+Verify the results by connecting to IdM server:
+ssh root@idm-server
+kinit admin
+ipa user-find
+ipa group-find
+Run the bulk user creation playbook:
+ansible-playbook -i inventory/hosts.yml playbooks/bulk-user-creation.yml
+Task 2: Use Ansible to Configure HBAC and Sudo Rules
+Subtask 2.1: Create HBAC Rules Playbook
+Host-Based Access Control (HBAC) rules determine which users can access which hosts and services.
+
+Create HBAC configuration playbook:
+cat > playbooks/configure-hbac.yml << 'EOF'
+---
+- name: Configure HBAC Rules
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ipaadmin_password: "RedHat123!"
+    
+    # Define host groups
+    host_groups:
+      - name: production_servers
+        description: "Production environment servers"
+        hosts:
+          - idm-client1.example.com
+      - name: development_servers
+        description: "Development environment servers"
+        hosts: []
+
+    # Define HBAC rules
+    hbac_rules:
+      - name: sysadmin_access
+        description: "System administrators full access"
+        users: []
+        groups:
+          - sysadmins
+        hosts: []
+        hostgroups:
+          - production_servers
+          - development_servers
+        services:
+          - sshd
+          - sudo
+      - name: developer_dev_access
+        description: "Developers access to development servers"
+        users: []
+        groups:
+          - developers
+        hosts: []
+        hostgroups:
+          - development_servers
+        services:
+          - sshd
+
+  tasks:
+    - name: Create host groups
+      freeipa.ansible_freeipa.ipahostgroup:
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.name }}"
+        description: "{{ item.description }}"
+        state: present
+      loop: "{{ host_groups }}"
+      delegate_to: idm-server
+
+    - name: Add hosts to host groups
+      freeipa.ansible_freeipa.ipahostgroup:
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.0.name }}"
+        host: "{{ item.1 }}"
+        action: member
+        state: present
+      with_subelements:
+        - "{{ host_groups }}"
+        - hosts
+      when: item.1 is defined and item.1 != ""
+      delegate_to: idm-server
+
+    - name: Create HBAC rules
+      freeipa.ansible_freeipa.ipahbacrule:
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.name }}"
+        description: "{{ item.description }}"
+        state: present
+      loop: "{{ hbac_rules }}"
+      delegate_to: idm-server
+
+    - name: Configure HBAC rule groups
+      freeipa.ansible_freeipa.ipahbacrule:
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.name }}"
+        group: "{{ item.groups }}"
+        action: member
+        state: present
+      loop: "{{ hbac_rules }}"
+      when: item.groups is defined and item.groups | length > 0
+      delegate_to: idm-server
+
+    - name: Configure HBAC rule host groups
+      freeipa.ansible_freeipa.ipahbacrule:
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.name }}"
+        hostgroup: "{{ item.hostgroups }}"
+        action: member
+        state: present
+      loop: "{{ hbac_rules }}"
+      when: item.hostgroups is defined and item.hostgroups | length > 0
+      delegate_to: idm-server
+
+    - name: Configure HBAC rule services
+      freeipa.ansible_freeipa.ipahbacrule:
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.name }}"
+        hbacsvc: "{{ item.services }}"
+        action: member
+        state: present
+      loop: "{{ hbac_rules }}"
+      when: item.services is defined and item.services | length > 0
+      delegate_to: idm-server
+
+    - name: Disable default allow_all rule
+      freeipa.ansible_freeipa.ipahbacrule:
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: allow_all
+        state: disabled
+      delegate_to: idm-server
+EOF
+Subtask 2.2: Create Sudo Rules Playbook
+Create sudo rules configuration playbook:
+cat > playbooks/configure-sudo.yml << 'EOF'
+---
+- name: Configure Sudo Rules
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ipaadmin_password: "RedHat123!"
+    
+    # Define sudo command groups
+    sudo_command_groups:
+      - name: system_commands
+        description: "System administration commands"
+        commands:
+          - /usr/bin/systemctl
+          - /usr/bin/mount
+          - /usr/bin/umount
+          - /usr/sbin/service
+      - name: user_management
+        description: "User management commands"
+        commands:
+          - /usr/sbin/useradd
+          - /usr/sbin/userdel
+          - /usr/sbin/usermod
+          - /usr/bin/passwd
+
+    # Define sudo rules
+    sudo_rules:
+      - name: sysadmin_full_sudo
+        description: "Full sudo access for system administrators"
+        users: []
+        groups:
+          - sysadmins
+        hosts: []
+        hostgroups:
+          - production_servers
+        commands:
+          - ALL
+        options:
+          - "!authenticate"
+      - name: developer_limited_sudo
+        description: "Limited sudo access for developers"
+        users: []
+        groups:
+          - developers
+        hosts: []
+        hostgroups:
+          - development_servers
+        command_groups:
+          - system_commands
+
+  tasks:
+    - name: Create sudo command groups
+      freeipa.ansible_freeipa.ipasudocmdgroup:
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.name }}"
+        description: "{{ item.description }}"
+        state: present
+      loop: "{{ sudo_command_groups }}"
+      delegate_to: idm-server
+
+    - name: Add commands to sudo command groups
+      freeipa.ansible_freeipa.ipasudocmd:
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.1 }}"
+        state: present
+      with_subelements:
+        - "{{ sudo_command_groups }}"
+        - commands
+      delegate_to: idm-server
+
+    - name: Associate commands with command groups
+      freeipa.ansible_freeipa.ipasudocmdgroup:
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.0.name }}"
+        sudocmd: "{{ item.1 }}"
+        action: member
+        state: present
+      with_subelements:
+        - "{{ sudo_command_groups }}"
+        - commands
+      delegate_to: idm-server
+
+    - name: Create sudo rules
+      freeipa.ansible_freeipa.ipasudorule:
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.name }}"
+        description: "{{ item.description }}"
+        state: present
+      loop: "{{ sudo_rules }}"
+      delegate_to: idm-server
+
+    - name: Configure sudo rule groups
+      freeipa.ansible_freeipa.ipasudorule:
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.name }}"
+        group: "{{ item.groups }}"
+        action: member
+        state: present
+      loop: "{{ sudo_rules }}"
+      when: item.groups is defined and item.groups | length > 0
+      delegate_to: idm-server
+
+    - name: Configure sudo rule host groups
+      freeipa.ansible_freeipa.ipasudorule:
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.name }}"
+        hostgroup: "{{ item.hostgroups }}"
+        action: member
+        state: present
+      loop: "{{ sudo_rules }}"
+      when: item.hostgroups is defined and item.hostgroups | length > 0
+      delegate_to: idm-server
+
+    - name: Configure sudo rule commands (ALL)
+      freeipa.ansible_freeipa.ipasudorule:
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.name }}"
+        allow_sudocmd_category: all
+        state: present
+      loop: "{{ sudo_rules }}"
+      when: item.commands is defined and 'ALL' in item.commands
+      delegate_to: idm-server
+
+    - name: Configure sudo rule command groups
+      freeipa.ansible_freeipa.ipasudorule:
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.name }}"
+        sudocmdgroup: "{{ item.command_groups }}"
+        action: member
+        state: present
+      loop: "{{ sudo_rules }}"
+      when: item.command_groups is defined and item.command_groups | length > 0
+      delegate_to: idm-server
+
+    - name: Configure sudo rule options
+      freeipa.ansible_freeipa.ipasudorule:
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.name }}"
+        sudooption: "{{ item.options }}"
+        action: member
+        state: present
+      loop: "{{ sudo_rules }}"
+      when: item.options is defined and item.options | length > 0
+      delegate_to: idm-server
+EOF
+Subtask 2.3: Execute HBAC and Sudo Configuration
+Run the HBAC configuration playbook:
+ansible-playbook -i inventory/hosts.yml playbooks/configure-hbac.yml
+Run the sudo configuration playbook:
+ansible-playbook -i inventory/hosts.yml playbooks/configure-sudo.yml
+Verify HBAC and sudo rules:
+ssh root@idm-server
+kinit admin
+ipa hbacrule-find
+ipa sudorule-find
+ipa sudocmdgroup-find
+Task 3: Automate IdM Server Setup and Client Enrollment
+Subtask 3.1: Create IdM Server Installation Playbook
+Create the IdM server installation playbook:
+cat > playbooks/install-idm-server.yml << 'EOF'
+---
+- name: Install and Configure IdM Server
+  hosts: idm_servers
+  become: true
+  vars:
+    idm_domain: example.com
+    idm_realm: EXAMPLE.COM
+    idm_admin_password: RedHat123!
+    idm_ds_password: RedHat123!
+    idm_hostname: "{{ inventory_hostname }}.{{ idm_domain }}"
+
+  tasks:
+    - name: Set hostname
+      hostname:
+        name: "{{ idm_hostname }}"
+
+    - name: Update /etc/hosts
+      lineinfile:
+        path: /etc/hosts
+        line: "{{ ansible_default_ipv4.address }} {{ idm_hostname }} {{ inventory_hostname }}"
+        state: present
+
+    - name: Install required packages
+      dnf:
+        name:
+          - ipa-server
+          - ipa-server-dns
+          - bind-dyndb-ldap
+        state: present
+
+    - name: Check if IdM is already installed
+      stat:
+        path: /etc/ipa/default.conf
+      register: idm_installed
+
+    - name: Install IdM server
+      command: >
+        ipa-server-install
+        --domain={{ idm_domain }}
+        --realm={{ idm_realm }}
+        --ds-password={{ idm_ds_password }}
+        --admin-password={{ idm_admin_password }}
+        --hostname={{ idm_hostname }}
+        --setup-dns
+        --forwarder=8.8.8.8
+        --forwarder=8.8.4.4
+        --unattended
+      when: not idm_installed.stat.exists
+      register: idm_install_result
+
+    - name: Start and enable IdM services
+      systemd:
+        name: ipa
+        state: started
+        enabled: true
+
+    - name: Open firewall ports
+      firewalld:
+        service: "{{ item }}"
+        permanent: true
+        state: enabled
+        immediate: true
+      loop:
+        - freeipa-ldap
+        - freeipa-ldaps
+        - dns
+        - ntp
+        - http
+        - https
+        - kerberos
+        - kpasswd
+
+    - name: Get Kerberos ticket for admin
+      shell: echo "{{ idm_admin_password }}" | kinit admin
+      no_log: true
+
+    - name: Display installation status
+      debug:
+        msg: "IdM server installation completed successfully"
+      when: idm_install_result is succeeded or idm_installed.stat.exists
+EOF
+Subtask 3.2: Create Client Enrollment Playbook
+Create the client enrollment playbook:
+cat > playbooks/enroll-idm-clients.yml << 'EOF'
+---
+- name: Enroll IdM Clients
+  hosts: idm_clients
+  become: true
+  vars:
+    idm_domain: example.com
+    idm_server: idm-server.example.com
+    idm_admin_password: RedHat123!
+    idm_hostname: "{{ inventory_hostname }}.{{ idm_domain }}"
+
+  tasks:
+    - name: Set hostname
+      hostname:
+        name: "{{ idm_hostname }}"
+
+    - name: Update /etc/hosts with IdM server
+      lineinfile:
+        path: /etc/hosts
+        line: "192.168.1.10 {{ idm_server }} idm-server"
+        state: present
+
+    - name: Update /etc/hosts with client hostname
+      lineinfile:
+        path: /etc/hosts
+        line: "{{ ansible_default_ipv4.address }} {{ idm_hostname }} {{ inventory_hostname }}"
+        state: present
+
+    - name: Install IdM client packages
+      dnf:
+        name:
+          - ipa-client
+          - oddjob-mkhomedir
+        state: present
+
+    - name: Check if client is already enrolled
+      stat:
+        path: /etc/ipa/default.conf
+      register: client_enrolled
+
+    - name: Enroll client to IdM domain
+      command: >
+        ipa-client-install
+        --domain={{ idm_domain }}
+        --server={{ idm_server }}
+        --hostname={{ idm_hostname }}
+        --principal=admin
+        --password={{ idm_admin_password }}
+        --unattended
+        --enable-dns-updates
+        --mkhomedir
+      when: not client_enrolled.stat.exists
+      register: client_enrollment_result
+
+    - name: Start and enable SSSD
+      systemd:
+        name: sssd
+        state: started
+        enabled: true
+
+    - name: Enable automatic home directory creation
+      systemd:
+        name: oddjobd
+        state: started
+        enabled: true
+
+    - name: Configure PAM for home directory creation
+      lineinfile:
+        path: /etc/pam.d/system-auth
+        line: "session optional pam_oddjob_mkhomedir.so skel=/etc/skel umask=0022"
+        insertafter: "session.*pam_unix.so"
+        state: present
+
+    - name: Test IdM authentication
+      command: id admin@{{ idm_domain }}
+      register: auth_test
+      failed_when: auth_test.rc != 0
+
+    - name: Display enrollment status
+      debug:
+        msg: "Client {{ inventory_hostname }} successfully enrolled to IdM domain {{ idm_domain }}"
+      when: client_enrollment_result is succeeded or client_enrolled.stat.exists
+EOF
+Subtask 3.3: Create Complete IdM Deployment Playbook
+Create a master playbook that orchestrates the entire deployment:
+cat > playbooks/deploy-complete-idm.yml << 'EOF'
+---
+- name: Complete IdM Deployment
+  hosts: localhost
+  gather_facts: false
+  vars:
+    deployment_phases:
+      - name: "IdM Server Installation"
+        playbook: "install-idm-server.yml"
+      - name: "Client Enrollment"
+        playbook: "enroll-idm-clients.yml"
+      - name: "User and Group Management"
+        playbook: "manage-users-groups.yml"
+      - name: "HBAC Configuration"
+        playbook: "configure-hbac.yml"
+      - name: "Sudo Configuration"
+        playbook: "configure-sudo.yml"
+
+  tasks:
+    - name: Display deployment plan
+      debug:
+        msg: "Starting complete IdM deployment with {{ deployment_phases | length }} phases"
+
+    - name: Execute deployment phases
+      debug:
+        msg: "Phase: {{ item.name }} - Playbook: {{ item.playbook }}"
+      loop: "{{ deployment_phases }}"
+
+- import_playbook: install-idm-server.yml
+- import_playbook: enroll-idm-clients.yml
+
+- name: Wait for IdM services to be ready
+  hosts: localhost
+  tasks:
+    - name: Wait for IdM server to be ready
+      wait_for:
+        host: idm-server
+        port: 443
+        timeout: 300
+
+- import_playbook: manage-users-groups.yml
+- import_playbook: configure-hbac.yml
+- import_playbook: configure-sudo.yml
+
+- name: Deployment Summary
+  hosts: localhost
+  tasks:
+    - name: Display completion message
+      debug:
+        msg: |
+          IdM deployment completed successfully!
+          
+          Services configured:
+          - IdM Server: idm-server.example.com
+          - Enrolled Clients: {{ groups['idm_clients'] | join(', ') }}
+          - Users and Groups: Created via automation
+          - HBAC Rules: Configured for access control
+          - Sudo Rules: Configured for privilege escalation
+          
+          Next steps:
+          1. Test user authentication
+          2. Verify HBAC rules
+          3. Test sudo access
+          4. Configure additional clients as needed
+EOF
+Subtask 3.4: Execute Complete IdM Deployment
+Run the complete deployment:
+ansible-playbook -i inventory/hosts.yml playbooks/deploy-complete-idm.yml
+Create a verification playbook:
+cat > playbooks/verify-deployment.yml << 'EOF'
+---
+- name: Verify IdM Deployment
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ipaadmin_password: "RedHat123!"
+
+  tasks:
+    - name: Test IdM server connectivity
+      uri:
+        url: "https://idm-server.example.com/ipa/ui/"
+        method: GET
+        validate_certs: false
+        status_code: 200
+      delegate_to: localhost
+
+    - name: Verify users exist
+      shell: |
+        echo "{{ ipaadmin_password }}" | kinit admin
+        ipa user-show jdoe
+      delegate_to: idm-server
+      register: user_check
+
+    - name: Verify groups exist
+      shell: |
+        echo "{{ ipaadmin_password }}" | kinit admin
+        ipa group-show developers
+      delegate_to: idm-server
+      register: group_check
+
+    - name: Verify HBAC rules
+      shell: |
+        echo "{{ ipaadmin_password }}" | kinit admin
+        ipa hbacrule-show sysadmin_access
+      delegate_to: idm-server
+      register: hbac_check
+
+    - name: Verify sudo rules
+      shell: |
+        echo "{{ ipaadmin_password }}" | kinit admin
+        ipa sudorule-show sysadmin_full_sudo
+      delegate_to: idm-server
+      register: sudo_check
+
+    - name: Display verification results
+      debug:
+        msg: |
+          Verification Results:
+          - Users: {{ 'PASS' if user_check.rc == 0 else 'FAIL' }}
+          - Groups: {{ 'PASS' if group_check.rc == 0 else 'FAIL' }}
+          - HBAC Rules: {{ 'PASS' if hbac_check.rc == 0 else 'FAIL' }}
+          - Sudo Rules: {{ 'PASS' if sudo_check.rc == 0 else 'FAIL' }}
+EOF
+Run the verification playbook:
+ansible-playbook -i inventory/hosts.yml playbooks/verify-deployment.yml
+Troubleshooting Tips
+Common Issues and Solutions
+Issue 1: Ansible collection not found
+
+# Solution: Install the required collection
+ansible-galaxy collection install freeipa.ansible_freeipa --force
+Issue 2: IdM server installation fails
+
+# Check DNS resolution
+nslookup idm-server.example.com
+
+# Verify firewall settings
+firewall-cmd --list-all
+
+# Check system resources
+free -h
+df -h
+Issue 3: Client enrollment fails
+
+# Verify network connectivity to IdM server
+ping idm-server.example.com
+telnet idm-server.example.com 443
+
+# Check DNS configuration
+cat /etc/resolv.conf
+Issue 4: Authentication failures
+
+# Test Kerberos authentication
+kinit admin
+klist
+
+# Check SSSD status
+systemctl status sssd
+tail -f /var/log/sssd/sssd.log
+Issue 5: Playbook execution errors
+
+# Run with verbose output
+ansible-playbook -vvv playbook.yml
+
+# Check syntax
+ansible-playbook --syntax-check playbook.yml
+
+# Test connectivity
+ansible all -m ping -i inventory/hosts.yml
+Best Practices for IdM Automation
+Security Considerations
+Password Management:
+
+Use Ansible Vault for sensitive data
+Implement password rotation policies
+Use strong, complex passwords
+Access Control:
+
+Follow principle of least privilege
+Regularly review and audit access rules
+Implement proper HBAC and sudo rules
+Backup and Recovery:
+
+Automate regular backups
+Test recovery procedures
+Document disaster recovery plans
+Automation Best Practices
+Playbook Organization:
+
+Use roles for complex configurations
+Implement proper error handling
+Use tags for selective execution
+Testing:
+
+Test playbooks in development environment
+Use check mode for dry runs
+Implement automated testing
+Documentation:
+
+Document all automation procedures
+Maintain inventory documentation
+Keep playbooks version controlled
+Conclusion
+In this comprehensive lab, you have successfully:
+
+• Created automated user and group management using Ansible playbooks that can handle both individual and bulk user creation from CSV files • Implemented HBAC and sudo rule automation to control access and privileges across your IdM environment • Automated complete IdM server installation and client enrollment processes, making deployment scalable and repeatable • Developed verification procedures to ensure all components are working correctly • Learned troubleshooting techniques for common IdM automation issues
+
+Why This Matters: Identity Management automation is crucial in modern IT environments because it:
+
+Reduces human error in user provisioning and access control
+Ensures consistency across multiple systems and environments
+Improves security through standardized access policies
+**Saves time
