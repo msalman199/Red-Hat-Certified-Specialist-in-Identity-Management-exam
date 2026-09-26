@@ -1,0 +1,479 @@
+Lab 15: Managing Host and Service Certificates
+Objectives
+By the end of this lab, students will be able to:
+
+Request and deploy service certificates using the ipa cert-request command
+Configure web services (HTTPD) to use IdM-issued certificates
+Configure LDAP services to use IdM-issued certificates
+Automate certificate deployment processes
+Understand certificate lifecycle management in Red Hat Identity Management
+Troubleshoot common certificate deployment issues
+Prerequisites
+Before starting this lab, students should have:
+
+Basic understanding of Red Hat Identity Management (IdM/FreeIPA)
+Familiarity with Linux command line operations
+Knowledge of SSL/TLS certificate concepts
+Understanding of web server configuration basics
+Experience with LDAP directory services
+Completed previous IdM labs or equivalent knowledge
+Lab Environment
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines for this lab. Simply click Start Lab to access your environment - no need to build your own virtual machines.
+
+Your lab environment includes:
+
+idm-server: Red Hat Enterprise Linux 9 with IdM server installed
+client1: Red Hat Enterprise Linux 9 client joined to IdM domain
+web-server: Red Hat Enterprise Linux 9 with Apache HTTPD installed
+Task 1: Request and Deploy Service Certificates
+Subtask 1.1: Prepare the Certificate Request Environment
+First, let's set up our environment and understand the current certificate status.
+
+Connect to the IdM server:
+ssh root@idm-server
+Verify IdM server status:
+ipactl status
+Authenticate as IdM administrator:
+kinit admin
+Check current certificates:
+ipa cert-find --all
+Subtask 1.2: Generate Certificate Signing Request (CSR)
+Now we'll create a certificate signing request for our web service.
+
+Create a directory for certificate operations:
+mkdir -p /etc/ssl/certs/lab15
+cd /etc/ssl/certs/lab15
+Generate a private key for the web service:
+openssl genrsa -out webservice.key 2048
+Set proper permissions on the private key:
+chmod 600 webservice.key
+Create a certificate signing request:
+openssl req -new -key webservice.key -out webservice.csr -subj "/CN=web-server.example.com/O=Example Organization/C=US"
+Verify the CSR content:
+openssl req -in webservice.csr -text -noout
+Subtask 1.3: Request Certificate from IdM CA
+Submit the certificate request to IdM:
+ipa cert-request webservice.csr --principal=HTTP/web-server.example.com
+Note the certificate serial number from the output and store it:
+CERT_SERIAL=$(ipa cert-request webservice.csr --principal=HTTP/web-server.example.com | grep "Serial number:" | awk '{print $3}')
+echo "Certificate Serial: $CERT_SERIAL"
+Retrieve the issued certificate:
+ipa cert-show $CERT_SERIAL --out=webservice.crt
+Verify the certificate details:
+openssl x509 -in webservice.crt -text -noout
+Subtask 1.4: Create Certificate Chain
+Get the CA certificate:
+ipa ca-show ipa --certificate-out=ca.crt
+Create a full certificate chain:
+cat webservice.crt ca.crt > webservice-chain.crt
+Verify the certificate chain:
+openssl verify -CAfile ca.crt webservice.crt
+Task 2: Configure Services to Use Issued Certificates
+Subtask 2.1: Configure HTTPD Service
+Let's configure Apache HTTPD to use our newly issued certificate.
+
+Connect to the web server:
+ssh root@web-server
+Install required packages:
+dnf install -y httpd mod_ssl
+Copy certificates to the web server (from idm-server):
+# On idm-server, copy files to web-server
+scp /etc/ssl/certs/lab15/webservice.key root@web-server:/etc/ssl/private/
+scp /etc/ssl/certs/lab15/webservice-chain.crt root@web-server:/etc/ssl/certs/
+scp /etc/ssl/certs/lab15/ca.crt root@web-server:/etc/ssl/certs/
+Set proper permissions on web server:
+chmod 600 /etc/ssl/private/webservice.key
+chmod 644 /etc/ssl/certs/webservice-chain.crt
+chmod 644 /etc/ssl/certs/ca.crt
+Configure SSL virtual host:
+cat > /etc/httpd/conf.d/ssl-lab15.conf << 'EOF'
+<VirtualHost *:443>
+    ServerName web-server.example.com
+    DocumentRoot /var/www/html
+    
+    SSLEngine on
+    SSLCertificateFile /etc/ssl/certs/webservice-chain.crt
+    SSLCertificateKeyFile /etc/ssl/private/webservice.key
+    SSLCACertificateFile /etc/ssl/certs/ca.crt
+    
+    # Modern SSL configuration
+    SSLProtocol all -SSLv3 -TLSv1 -TLSv1.1
+    SSLCipherSuite ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384
+    SSLHonorCipherOrder off
+    SSLSessionTickets off
+    
+    # Security headers
+    Header always set Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+    Header always set X-Frame-Options DENY
+    Header always set X-Content-Type-Options nosniff
+</VirtualHost>
+EOF
+Create a test page:
+cat > /var/www/html/index.html << 'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>IdM Certificate Lab</title>
+</head>
+<body>
+    <h1>SSL Certificate Test Page</h1>
+    <p>This page is served using an IdM-issued certificate.</p>
+    <p>Server: web-server.example.com</p>
+</body>
+</html>
+EOF
+Enable and start HTTPD:
+systemctl enable httpd
+systemctl start httpd
+Open firewall ports:
+firewall-cmd --permanent --add-service=http
+firewall-cmd --permanent --add-service=https
+firewall-cmd --reload
+Subtask 2.2: Configure LDAP Service with Certificates
+Now let's configure LDAP to use certificates for secure connections.
+
+Return to the IdM server:
+ssh root@idm-server
+Create LDAP service certificate request:
+cd /etc/ssl/certs/lab15
+openssl genrsa -out ldapservice.key 2048
+chmod 600 ldapservice.key
+Generate CSR for LDAP service:
+openssl req -new -key ldapservice.key -out ldapservice.csr -subj "/CN=idm-server.example.com/O=Example Organization/C=US"
+Request certificate for LDAP service:
+LDAP_CERT_SERIAL=$(ipa cert-request ldapservice.csr --principal=ldap/idm-server.example.com | grep "Serial number:" | awk '{print $3}')
+echo "LDAP Certificate Serial: $LDAP_CERT_SERIAL"
+Retrieve the LDAP certificate:
+ipa cert-show $LDAP_CERT_SERIAL --out=ldapservice.crt
+Create LDAP certificate chain:
+cat ldapservice.crt ca.crt > ldapservice-chain.crt
+Copy certificates to LDAP directory:
+cp ldapservice.key /etc/dirsrv/slapd-EXAMPLE-COM/
+cp ldapservice-chain.crt /etc/dirsrv/slapd-EXAMPLE-COM/
+chown dirsrv:dirsrv /etc/dirsrv/slapd-EXAMPLE-COM/ldapservice.*
+chmod 600 /etc/dirsrv/slapd-EXAMPLE-COM/ldapservice.key
+Subtask 2.3: Test Certificate Deployment
+Test HTTPS connection:
+curl -k https://web-server.example.com
+Test certificate validation:
+openssl s_client -connect web-server.example.com:443 -CAfile /etc/ssl/certs/lab15/ca.crt
+Check certificate expiration:
+echo | openssl s_client -connect web-server.example.com:443 2>/dev/null | openssl x509 -noout -dates
+Task 3: Automate Certificate Deployment
+Subtask 3.1: Create Certificate Request Script
+Let's create a script to automate the certificate request process.
+
+Create automation directory:
+mkdir -p /opt/cert-automation
+cd /opt/cert-automation
+Create certificate request script:
+cat > request-service-cert.sh << 'EOF'
+#!/bin/bash
+
+# Certificate Request Automation Script
+# Usage: ./request-service-cert.sh <service-name> <hostname> <principal>
+
+set -e
+
+SERVICE_NAME="$1"
+HOSTNAME="$2"
+PRINCIPAL="$3"
+
+if [ $# -ne 3 ]; then
+    echo "Usage: $0 <service-name> <hostname> <principal>"
+    echo "Example: $0 webservice web-server.example.com HTTP/web-server.example.com"
+    exit 1
+fi
+
+CERT_DIR="/etc/ssl/certs/automated"
+mkdir -p "$CERT_DIR"
+cd "$CERT_DIR"
+
+echo "Generating private key for $SERVICE_NAME..."
+openssl genrsa -out "${SERVICE_NAME}.key" 2048
+chmod 600 "${SERVICE_NAME}.key"
+
+echo "Creating certificate signing request..."
+openssl req -new -key "${SERVICE_NAME}.key" -out "${SERVICE_NAME}.csr" \
+    -subj "/CN=${HOSTNAME}/O=Example Organization/C=US"
+
+echo "Requesting certificate from IdM CA..."
+CERT_SERIAL=$(ipa cert-request "${SERVICE_NAME}.csr" --principal="$PRINCIPAL" | \
+    grep "Serial number:" | awk '{print $3}')
+
+if [ -z "$CERT_SERIAL" ]; then
+    echo "Error: Failed to get certificate serial number"
+    exit 1
+fi
+
+echo "Certificate serial number: $CERT_SERIAL"
+
+echo "Retrieving issued certificate..."
+ipa cert-show "$CERT_SERIAL" --out="${SERVICE_NAME}.crt"
+
+echo "Getting CA certificate..."
+ipa ca-show ipa --certificate-out=ca.crt
+
+echo "Creating certificate chain..."
+cat "${SERVICE_NAME}.crt" ca.crt > "${SERVICE_NAME}-chain.crt"
+
+echo "Verifying certificate..."
+openssl verify -CAfile ca.crt "${SERVICE_NAME}.crt"
+
+echo "Certificate files created:"
+echo "  Private key: ${CERT_DIR}/${SERVICE_NAME}.key"
+echo "  Certificate: ${CERT_DIR}/${SERVICE_NAME}.crt"
+echo "  Chain: ${CERT_DIR}/${SERVICE_NAME}-chain.crt"
+echo "  CA: ${CERT_DIR}/ca.crt"
+
+# Store certificate info
+cat > "${SERVICE_NAME}-info.txt" << INFO
+Service: $SERVICE_NAME
+Hostname: $HOSTNAME
+Principal: $PRINCIPAL
+Serial: $CERT_SERIAL
+Created: $(date)
+Expires: $(openssl x509 -in "${SERVICE_NAME}.crt" -noout -enddate | cut -d= -f2)
+INFO
+
+echo "Certificate request completed successfully!"
+EOF
+Make the script executable:
+chmod +x request-service-cert.sh
+Subtask 3.2: Create Certificate Deployment Script
+Create deployment script:
+cat > deploy-service-cert.sh << 'EOF'
+#!/bin/bash
+
+# Certificate Deployment Automation Script
+# Usage: ./deploy-service-cert.sh <service-name> <target-host> <service-type>
+
+set -e
+
+SERVICE_NAME="$1"
+TARGET_HOST="$2"
+SERVICE_TYPE="$3"
+
+if [ $# -ne 3 ]; then
+    echo "Usage: $0 <service-name> <target-host> <service-type>"
+    echo "Service types: httpd, nginx, ldap"
+    echo "Example: $0 webservice web-server.example.com httpd"
+    exit 1
+fi
+
+CERT_DIR="/etc/ssl/certs/automated"
+REMOTE_CERT_DIR="/etc/ssl/certs"
+REMOTE_KEY_DIR="/etc/ssl/private"
+
+if [ ! -f "${CERT_DIR}/${SERVICE_NAME}.key" ]; then
+    echo "Error: Certificate files not found for $SERVICE_NAME"
+    echo "Run request-service-cert.sh first"
+    exit 1
+fi
+
+echo "Deploying certificates for $SERVICE_NAME to $TARGET_HOST..."
+
+# Copy certificates to target host
+echo "Copying certificate files..."
+ssh root@"$TARGET_HOST" "mkdir -p $REMOTE_CERT_DIR $REMOTE_KEY_DIR"
+
+scp "${CERT_DIR}/${SERVICE_NAME}.key" root@"$TARGET_HOST":"$REMOTE_KEY_DIR/"
+scp "${CERT_DIR}/${SERVICE_NAME}-chain.crt" root@"$TARGET_HOST":"$REMOTE_CERT_DIR/"
+scp "${CERT_DIR}/ca.crt" root@"$TARGET_HOST":"$REMOTE_CERT_DIR/"
+
+# Set permissions
+ssh root@"$TARGET_HOST" "chmod 600 $REMOTE_KEY_DIR/${SERVICE_NAME}.key"
+ssh root@"$TARGET_HOST" "chmod 644 $REMOTE_CERT_DIR/${SERVICE_NAME}-chain.crt"
+ssh root@"$TARGET_HOST" "chmod 644 $REMOTE_CERT_DIR/ca.crt"
+
+# Configure service based on type
+case "$SERVICE_TYPE" in
+    httpd)
+        echo "Configuring Apache HTTPD..."
+        ssh root@"$TARGET_HOST" << HTTPD_CONFIG
+cat > /etc/httpd/conf.d/ssl-${SERVICE_NAME}.conf << 'HTTPD_EOF'
+<VirtualHost *:443>
+    ServerName ${TARGET_HOST}
+    DocumentRoot /var/www/html
+    
+    SSLEngine on
+    SSLCertificateFile ${REMOTE_CERT_DIR}/${SERVICE_NAME}-chain.crt
+    SSLCertificateKeyFile ${REMOTE_KEY_DIR}/${SERVICE_NAME}.key
+    SSLCACertificateFile ${REMOTE_CERT_DIR}/ca.crt
+    
+    SSLProtocol all -SSLv3 -TLSv1 -TLSv1.1
+    SSLCipherSuite ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256
+    SSLHonorCipherOrder off
+</VirtualHost>
+HTTPD_EOF
+
+systemctl reload httpd
+HTTPD_CONFIG
+        ;;
+    nginx)
+        echo "Configuring Nginx..."
+        ssh root@"$TARGET_HOST" << NGINX_CONFIG
+cat > /etc/nginx/conf.d/ssl-${SERVICE_NAME}.conf << 'NGINX_EOF'
+server {
+    listen 443 ssl;
+    server_name ${TARGET_HOST};
+    
+    ssl_certificate ${REMOTE_CERT_DIR}/${SERVICE_NAME}-chain.crt;
+    ssl_certificate_key ${REMOTE_KEY_DIR}/${SERVICE_NAME}.key;
+    ssl_trusted_certificate ${REMOTE_CERT_DIR}/ca.crt;
+    
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256;
+    
+    location / {
+        root /usr/share/nginx/html;
+        index index.html;
+    }
+}
+NGINX_EOF
+
+systemctl reload nginx
+NGINX_CONFIG
+        ;;
+    *)
+        echo "Service type $SERVICE_TYPE not supported in this script"
+        echo "Certificates deployed but service not configured"
+        ;;
+esac
+
+echo "Certificate deployment completed for $SERVICE_NAME on $TARGET_HOST"
+EOF
+Make the deployment script executable:
+chmod +x deploy-service-cert.sh
+Subtask 3.3: Create Certificate Monitoring Script
+Create monitoring script:
+cat > monitor-certificates.sh << 'EOF'
+#!/bin/bash
+
+# Certificate Monitoring Script
+# Checks certificate expiration and validity
+
+CERT_DIR="/etc/ssl/certs/automated"
+WARNING_DAYS=30
+
+echo "Certificate Monitoring Report - $(date)"
+echo "========================================"
+
+if [ ! -d "$CERT_DIR" ]; then
+    echo "No certificates found in $CERT_DIR"
+    exit 0
+fi
+
+cd "$CERT_DIR"
+
+for cert_file in *.crt; do
+    if [ -f "$cert_file" ]; then
+        echo ""
+        echo "Certificate: $cert_file"
+        echo "-------------------"
+        
+        # Get certificate details
+        SUBJECT=$(openssl x509 -in "$cert_file" -noout -subject | sed 's/subject=//')
+        ISSUER=$(openssl x509 -in "$cert_file" -noout -issuer | sed 's/issuer=//')
+        NOT_AFTER=$(openssl x509 -in "$cert_file" -noout -enddate | cut -d= -f2)
+        
+        echo "Subject: $SUBJECT"
+        echo "Issuer: $ISSUER"
+        echo "Expires: $NOT_AFTER"
+        
+        # Check expiration
+        EXPIRE_DATE=$(date -d "$NOT_AFTER" +%s)
+        CURRENT_DATE=$(date +%s)
+        DAYS_UNTIL_EXPIRE=$(( (EXPIRE_DATE - CURRENT_DATE) / 86400 ))
+        
+        if [ $DAYS_UNTIL_EXPIRE -lt 0 ]; then
+            echo "Status: EXPIRED ($((0 - DAYS_UNTIL_EXPIRE)) days ago)"
+        elif [ $DAYS_UNTIL_EXPIRE -lt $WARNING_DAYS ]; then
+            echo "Status: WARNING (expires in $DAYS_UNTIL_EXPIRE days)"
+        else
+            echo "Status: OK (expires in $DAYS_UNTIL_EXPIRE days)"
+        fi
+        
+        # Verify certificate
+        if openssl verify -CAfile ca.crt "$cert_file" >/dev/null 2>&1; then
+            echo "Verification: VALID"
+        else
+            echo "Verification: INVALID"
+        fi
+    fi
+done
+
+echo ""
+echo "Monitoring complete."
+EOF
+Make the monitoring script executable:
+chmod +x monitor-certificates.sh
+Subtask 3.4: Test Automation Scripts
+Test the certificate request script:
+./request-service-cert.sh testservice test-server.example.com HTTP/test-server.example.com
+Verify the generated files:
+ls -la /etc/ssl/certs/automated/testservice*
+Test the monitoring script:
+./monitor-certificates.sh
+Create a cron job for monitoring:
+cat > /etc/cron.d/cert-monitor << 'EOF'
+# Certificate monitoring - run daily at 2 AM
+0 2 * * * root /opt/cert-automation/monitor-certificates.sh >> /var/log/cert-monitor.log 2>&1
+EOF
+Troubleshooting Common Issues
+Certificate Request Failures
+Check Kerberos authentication:
+klist
+# If expired, re-authenticate
+kinit admin
+Verify service principal exists:
+ipa service-find HTTP/web-server.example.com
+# If not found, create it
+ipa service-add HTTP/web-server.example.com
+Check CSR format:
+openssl req -in certificate.csr -text -noout
+SSL Configuration Issues
+Test SSL configuration:
+openssl s_client -connect hostname:443 -servername hostname
+Check certificate chain:
+openssl verify -CAfile ca.crt certificate.crt
+Verify file permissions:
+ls -la /etc/ssl/private/
+ls -la /etc/ssl/certs/
+Service Configuration Problems
+Check Apache configuration:
+httpd -t
+systemctl status httpd
+Review logs:
+tail -f /var/log/httpd/error_log
+tail -f /var/log/httpd/ssl_error_log
+Verify firewall settings:
+firewall-cmd --list-all
+Conclusion
+In this lab, you have successfully accomplished the following:
+
+Certificate Management Skills Gained:
+
+Requested and deployed service certificates using IdM's Certificate Authority
+Configured Apache HTTPD to use IdM-issued certificates for secure web services
+Set up LDAP services with proper certificate authentication
+Created automated scripts for certificate lifecycle management
+Key Technical Achievements:
+
+Mastered the ipa cert-request command for certificate generation
+Implemented proper certificate chain configuration
+Developed automation scripts for scalable certificate deployment
+Established monitoring procedures for certificate expiration tracking
+Real-World Applications: This knowledge is essential for enterprise environments where:
+
+Organizations need centralized certificate management
+Multiple services require trusted SSL/TLS certificates
+Automated certificate deployment reduces operational overhead
+Certificate monitoring prevents service disruptions due to expired certificates
+Next Steps:
+
+Practice certificate renewal procedures
+Explore certificate revocation processes
+Implement certificate-based authentication for additional services
+Study integration with external Certificate Authorities
+The skills learned in this lab are directly applicable to the Red Hat Certified Specialist in Identity Management exam and real-world enterprise certificate management scenarios.
