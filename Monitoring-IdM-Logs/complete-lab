@@ -1,0 +1,384 @@
+Lab 17: Monitoring IdM Logs
+Objectives
+By the end of this lab, students will be able to:
+
+Use ipa-healthcheck to perform comprehensive diagnostics on IdM infrastructure
+Navigate and analyze IdM logs located in /var/log/dirsrv and krb5kdc.log
+Configure syslog for centralized log aggregation of IdM services
+Identify common IdM issues through log analysis
+Implement proactive monitoring strategies for IdM environments
+Troubleshoot authentication and directory service problems using log data
+Prerequisites
+Before starting this lab, students should have:
+
+Basic understanding of Linux command line operations
+Familiarity with IdM (Identity Management) concepts and architecture
+Knowledge of system logging principles and syslog configuration
+Understanding of LDAP directory services and Kerberos authentication
+Experience with text processing tools like grep, tail, and awk
+Basic knowledge of JSON format for interpreting healthcheck results
+Lab Environment
+Al Nafi provides ready-to-use Linux-based cloud machines for this lab. Simply click Start Lab to access your pre-configured environment. No need to build your own VM or install additional software - everything is ready to go!
+
+Your lab environment includes:
+
+CentOS/RHEL 8 or 9 system with IdM server installed
+Pre-configured IdM domain with sample users and services
+All necessary logging tools and utilities
+Root access for system configuration
+Task 1: Use ipa-healthcheck for Diagnostics
+Subtask 1.1: Install and Configure ipa-healthcheck
+The ipa-healthcheck tool provides comprehensive health monitoring for IdM installations.
+
+Install the ipa-healthcheck package:
+sudo dnf install -y freeipa-healthcheck
+Verify the installation:
+rpm -qa | grep healthcheck
+Check the default configuration:
+sudo cat /etc/ipahealthcheck/ipahealthcheck.conf
+Subtask 1.2: Run Basic Health Checks
+Execute a complete health check:
+sudo ipa-healthcheck
+Run health check with verbose output:
+sudo ipa-healthcheck --verbose
+Generate health check report in JSON format:
+sudo ipa-healthcheck --output-type json > /tmp/idm-healthcheck.json
+View the formatted JSON report:
+python3 -m json.tool /tmp/idm-healthcheck.json | less
+Subtask 1.3: Analyze Specific Health Check Categories
+Check only certificate-related issues:
+sudo ipa-healthcheck --source ipahealthcheck.ipa.certs
+Check DNS configuration:
+sudo ipa-healthcheck --source ipahealthcheck.ipa.dns
+Check replication status:
+sudo ipa-healthcheck --source ipahealthcheck.ds.replication
+Create a script to run regular health checks:
+sudo tee /usr/local/bin/idm-health-monitor.sh << 'EOF'
+#!/bin/bash
+# IdM Health Check Monitor Script
+
+LOGFILE="/var/log/idm-healthcheck.log"
+TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+
+echo "[$TIMESTAMP] Starting IdM Health Check" >> $LOGFILE
+
+# Run health check and capture results
+/usr/bin/ipa-healthcheck --output-type json > /tmp/healthcheck-$(date +%Y%m%d-%H%M%S).json
+
+# Check for critical issues
+CRITICAL_COUNT=$(ipa-healthcheck --output-type json | jq '[.[] | select(.result == "CRITICAL")] | length')
+
+if [ "$CRITICAL_COUNT" -gt 0 ]; then
+    echo "[$TIMESTAMP] ALERT: $CRITICAL_COUNT critical issues found!" >> $LOGFILE
+    # Send alert (could integrate with monitoring system)
+fi
+
+echo "[$TIMESTAMP] Health check completed" >> $LOGFILE
+EOF
+Make the script executable:
+sudo chmod +x /usr/local/bin/idm-health-monitor.sh
+Task 2: Check IdM Logs in /var/log/dirsrv and krb5kdc.log
+Subtask 2.1: Explore Directory Server Logs
+Navigate to the Directory Server log directory:
+cd /var/log/dirsrv
+ls -la
+Identify your IdM instance directory:
+sudo find /var/log/dirsrv -name "slapd-*" -type d
+View the main Directory Server access log:
+sudo tail -f /var/log/dirsrv/slapd-$(hostname -s | tr '[:upper:]' '[:lower:]')/access
+Check Directory Server error logs:
+sudo tail -20 /var/log/dirsrv/slapd-$(hostname -s | tr '[:upper:]' '[:lower:]')/errors
+Monitor real-time LDAP operations:
+sudo tail -f /var/log/dirsrv/slapd-$(hostname -s | tr '[:upper:]' '[:lower:]')/access | grep -E "(BIND|SEARCH|ADD|MOD|DEL)"
+Subtask 2.2: Analyze Kerberos KDC Logs
+Locate and examine the Kerberos KDC log:
+sudo tail -20 /var/log/krb5kdc.log
+Monitor authentication attempts in real-time:
+sudo tail -f /var/log/krb5kdc.log
+Search for failed authentication attempts:
+sudo grep -i "failed" /var/log/krb5kdc.log | tail -10
+Analyze successful ticket requests:
+sudo grep -i "issue" /var/log/krb5kdc.log | tail -10
+Subtask 2.3: Create Log Analysis Scripts
+Create a comprehensive log analysis script:
+sudo tee /usr/local/bin/idm-log-analyzer.sh << 'EOF'
+#!/bin/bash
+# IdM Log Analysis Script
+
+echo "=== IdM Log Analysis Report ==="
+echo "Generated on: $(date)"
+echo
+
+# Find IdM instance
+INSTANCE_DIR=$(find /var/log/dirsrv -name "slapd-*" -type d | head -1)
+INSTANCE_NAME=$(basename $INSTANCE_DIR)
+
+echo "=== Directory Server Statistics ==="
+if [ -f "$INSTANCE_DIR/access" ]; then
+    echo "Total LDAP operations today:"
+    grep "$(date '+%d/%b/%Y')" $INSTANCE_DIR/access | wc -l
+    
+    echo "BIND operations:"
+    grep "$(date '+%d/%b/%Y')" $INSTANCE_DIR/access | grep -c "BIND"
+    
+    echo "SEARCH operations:"
+    grep "$(date '+%d/%b/%Y')" $INSTANCE_DIR/access | grep -c "SRCH"
+    
+    echo "Recent errors:"
+    tail -5 $INSTANCE_DIR/errors
+fi
+
+echo
+echo "=== Kerberos Statistics ==="
+if [ -f "/var/log/krb5kdc.log" ]; then
+    echo "Authentication attempts today:"
+    grep "$(date '+%b %d')" /var/log/krb5kdc.log | wc -l
+    
+    echo "Failed authentications:"
+    grep "$(date '+%b %d')" /var/log/krb5kdc.log | grep -c -i "failed"
+    
+    echo "Recent Kerberos activity:"
+    tail -5 /var/log/krb5kdc.log
+fi
+
+echo
+echo "=== System Resource Usage ==="
+echo "Disk usage for logs:"
+du -sh /var/log/dirsrv /var/log/krb5kdc.log 2>/dev/null
+
+echo
+echo "=== Recent Critical Events ==="
+journalctl -u ipa -n 5 --no-pager
+EOF
+Make the script executable and run it:
+sudo chmod +x /usr/local/bin/idm-log-analyzer.sh
+sudo /usr/local/bin/idm-log-analyzer.sh
+Task 3: Set Up Log Aggregation with Syslog for IdM Logs
+Subtask 3.1: Configure Rsyslog for IdM Log Aggregation
+Create a dedicated rsyslog configuration for IdM:
+sudo tee /etc/rsyslog.d/50-idm.conf << 'EOF'
+# IdM Log Aggregation Configuration
+
+# Directory Server logs
+$ModLoad imfile
+$InputFileName /var/log/dirsrv/slapd-*/access
+$InputFileTag dirsrv-access:
+$InputFileStateFile stat-dirsrv-access
+$InputFileSeverity info
+$InputFileFacility local0
+$InputRunFileMonitor
+
+$InputFileName /var/log/dirsrv/slapd-*/errors
+$InputFileTag dirsrv-errors:
+$InputFileStateFile stat-dirsrv-errors
+$InputFileSeverity error
+$InputFileFacility local0
+$InputRunFileMonitor
+
+# Kerberos KDC logs
+$InputFileName /var/log/krb5kdc.log
+$InputFileTag krb5kdc:
+$InputFileStateFile stat-krb5kdc
+$InputFileSeverity info
+$InputFileFacility local1
+$InputRunFileMonitor
+
+# IdM aggregated log file
+local0.*    /var/log/idm-dirsrv.log
+local1.*    /var/log/idm-kerberos.log
+
+# Stop processing these messages
+local0.*    stop
+local1.*    stop
+EOF
+Restart rsyslog service:
+sudo systemctl restart rsyslog
+sudo systemctl status rsyslog
+Verify the configuration:
+sudo rsyslogd -N1
+Subtask 3.2: Configure Log Rotation
+Create logrotate configuration for IdM aggregated logs:
+sudo tee /etc/logrotate.d/idm-logs << 'EOF'
+/var/log/idm-dirsrv.log /var/log/idm-kerberos.log {
+    daily
+    rotate 30
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0644 root root
+    postrotate
+        /bin/kill -HUP `cat /var/run/rsyslogd.pid 2> /dev/null` 2> /dev/null || true
+    endscript
+}
+EOF
+Test logrotate configuration:
+sudo logrotate -d /etc/logrotate.d/idm-logs
+Subtask 3.3: Set Up Remote Log Forwarding
+Configure rsyslog to forward IdM logs to a remote server (optional):
+sudo tee -a /etc/rsyslog.d/50-idm.conf << 'EOF'
+
+# Forward IdM logs to remote syslog server
+# Uncomment and modify the following lines for remote logging
+# *.* @@remote-log-server:514
+# local0.* @@remote-log-server:514
+# local1.* @@remote-log-server:514
+EOF
+Create a local log monitoring script:
+sudo tee /usr/local/bin/idm-log-monitor.sh << 'EOF'
+#!/bin/bash
+# IdM Log Monitoring Script
+
+DIRSRV_LOG="/var/log/idm-dirsrv.log"
+KRB5_LOG="/var/log/idm-kerberos.log"
+ALERT_LOG="/var/log/idm-alerts.log"
+
+# Monitor for critical patterns
+monitor_logs() {
+    # Check for authentication failures
+    if tail -100 $KRB5_LOG 2>/dev/null | grep -q -i "failed"; then
+        echo "$(date): WARNING - Kerberos authentication failures detected" >> $ALERT_LOG
+    fi
+    
+    # Check for directory server errors
+    if tail -100 $DIRSRV_LOG 2>/dev/null | grep -q -i "error"; then
+        echo "$(date): WARNING - Directory server errors detected" >> $ALERT_LOG
+    fi
+    
+    # Check for replication issues
+    if tail -100 $DIRSRV_LOG 2>/dev/null | grep -q -i "replication"; then
+        echo "$(date): INFO - Replication activity detected" >> $ALERT_LOG
+    fi
+}
+
+# Run monitoring
+monitor_logs
+
+# Clean old alerts (keep last 1000 lines)
+if [ -f "$ALERT_LOG" ]; then
+    tail -1000 $ALERT_LOG > ${ALERT_LOG}.tmp
+    mv ${ALERT_LOG}.tmp $ALERT_LOG
+fi
+EOF
+Make the monitoring script executable:
+sudo chmod +x /usr/local/bin/idm-log-monitor.sh
+Set up a cron job for regular monitoring:
+sudo crontab -e
+Add the following line:
+
+*/5 * * * * /usr/local/bin/idm-log-monitor.sh
+Subtask 3.4: Create a Log Dashboard Script
+Create a comprehensive log dashboard:
+sudo tee /usr/local/bin/idm-log-dashboard.sh << 'EOF'
+#!/bin/bash
+# IdM Log Dashboard
+
+clear
+echo "========================================"
+echo "       IdM Log Monitoring Dashboard     "
+echo "========================================"
+echo "Last updated: $(date)"
+echo
+
+# Function to display log statistics
+show_stats() {
+    local logfile=$1
+    local description=$2
+    
+    if [ -f "$logfile" ]; then
+        echo "=== $description ==="
+        echo "Total lines: $(wc -l < $logfile)"
+        echo "Last 5 entries:"
+        tail -5 "$logfile" | sed 's/^/  /'
+        echo
+    else
+        echo "=== $description ==="
+        echo "Log file not found: $logfile"
+        echo
+    fi
+}
+
+# Display statistics
+show_stats "/var/log/idm-dirsrv.log" "Directory Server Logs"
+show_stats "/var/log/idm-kerberos.log" "Kerberos Logs"
+show_stats "/var/log/idm-alerts.log" "IdM Alerts"
+
+# Show current system status
+echo "=== System Status ==="
+echo "IdM Services:"
+systemctl is-active ipa --quiet && echo "  IPA: Active" || echo "  IPA: Inactive"
+systemctl is-active dirsrv@* --quiet && echo "  Directory Server: Active" || echo "  Directory Server: Inactive"
+systemctl is-active krb5kdc --quiet && echo "  Kerberos KDC: Active" || echo "  Kerberos KDC: Inactive"
+
+echo
+echo "=== Recent Health Check Status ==="
+if [ -f "/tmp/idm-healthcheck.json" ]; then
+    python3 -c "
+import json
+try:
+    with open('/tmp/idm-healthcheck.json', 'r') as f:
+        data = json.load(f)
+    critical = sum(1 for item in data if item.get('result') == 'CRITICAL')
+    warning = sum(1 for item in data if item.get('result') == 'WARNING')
+    success = sum(1 for item in data if item.get('result') == 'SUCCESS')
+    print(f'  Critical: {critical}')
+    print(f'  Warning: {warning}')
+    print(f'  Success: {success}')
+except:
+    print('  Health check data not available')
+"
+else
+    echo "  No recent health check data available"
+fi
+
+echo
+echo "========================================"
+EOF
+Make the dashboard executable and run it:
+sudo chmod +x /usr/local/bin/idm-log-dashboard.sh
+sudo /usr/local/bin/idm-log-dashboard.sh
+Troubleshooting Tips
+Common Issues and Solutions
+Permission Denied Errors:
+
+Ensure you're running commands with sudo when accessing log files
+Check file permissions: ls -la /var/log/dirsrv/
+Log Files Not Found:
+
+Verify IdM services are running: systemctl status ipa
+Check if logs are being written: ls -la /var/log/dirsrv/slapd-*/
+Rsyslog Configuration Issues:
+
+Test configuration: sudo rsyslogd -N1
+Check rsyslog status: systemctl status rsyslog
+Verify log file creation: ls -la /var/log/idm-*.log
+Health Check Failures:
+
+Ensure all IdM services are running
+Check network connectivity and DNS resolution
+Verify certificates are not expired
+Verification Commands
+# Verify log aggregation is working
+sudo tail -f /var/log/idm-dirsrv.log &
+sudo tail -f /var/log/idm-kerberos.log &
+
+# Test authentication to generate log entries
+kinit admin
+
+# Check if logs are being captured
+sudo grep "$(date '+%Y-%m-%d')" /var/log/idm-*.log
+Conclusion
+In this lab, you have successfully:
+
+Implemented comprehensive IdM monitoring using ipa-healthcheck for proactive issue detection
+Mastered log analysis techniques for both Directory Server and Kerberos components
+Configured centralized log aggregation using rsyslog for better log management
+Created automated monitoring scripts for continuous IdM health surveillance
+Set up alerting mechanisms to detect critical issues promptly
+These monitoring capabilities are essential for maintaining a healthy IdM environment in production. The skills you've developed will help you:
+
+Quickly identify and resolve authentication and directory service issues
+Implement proactive monitoring to prevent service disruptions
+Maintain compliance with security and operational requirements
+Optimize IdM performance through log analysis and trend identification
+The monitoring infrastructure you've built provides a solid foundation for enterprise IdM operations, enabling you to maintain high availability and security for your identity management services. These practices are crucial for the Red Hat Certified Specialist in Identity Management certification and real-world IdM administration.
