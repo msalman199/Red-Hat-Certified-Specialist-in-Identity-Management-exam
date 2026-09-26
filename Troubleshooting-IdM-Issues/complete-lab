@@ -1,0 +1,462 @@
+Lab 20: Troubleshooting IdM Issues
+Objectives
+By the end of this lab, students will be able to:
+
+Diagnose and resolve common Identity Management (IdM) authentication issues
+Troubleshoot user access problems and configuration errors
+Use ipa-healthcheck tool to identify system health issues
+Analyze IdM logs to pinpoint service disruptions
+Resolve DNS, Kerberos, and SSSD related problems
+Implement systematic troubleshooting methodologies for IdM environments
+Prerequisites
+Before starting this lab, students should have:
+
+Basic understanding of Linux command line operations
+Familiarity with Identity Management concepts
+Knowledge of DNS, Kerberos, and LDAP fundamentals
+Experience with log file analysis
+Understanding of systemd service management
+Basic networking concepts
+Lab Environment
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines with IdM already installed. Simply click Start Lab to access your environment - no need to build your own VM or install software.
+
+Your lab environment includes:
+
+CentOS Stream 9 or RHEL 9 based system
+FreeIPA server pre-installed
+Sample users and groups configured
+Intentionally introduced issues for troubleshooting practice
+Task 1: Using ipa-healthcheck and Logs to Identify Issues
+Subtask 1.1: Install and Configure ipa-healthcheck
+First, let's ensure the ipa-healthcheck tool is available and properly configured.
+
+Check if ipa-healthcheck is installed:
+rpm -qa | grep ipa-healthcheck
+Install ipa-healthcheck if not present:
+sudo dnf install -y freeipa-healthcheck
+Verify the installation:
+ipa-healthcheck --version
+Subtask 1.2: Run Initial Health Check
+Execute a comprehensive health check:
+sudo ipa-healthcheck --verbose
+Run health check with JSON output for easier parsing:
+sudo ipa-healthcheck --output-type json | python3 -m json.tool
+Check specific health check sources:
+# Check only DNS-related issues
+sudo ipa-healthcheck --source ipahealthcheck.ipa.dna
+
+# Check certificate issues
+sudo ipa-healthcheck --source ipahealthcheck.ipa.certs
+
+# Check replication issues
+sudo ipa-healthcheck --source ipahealthcheck.ipa.replica
+Subtask 1.3: Analyze IdM Log Files
+Check the main IPA installation log:
+sudo tail -f /var/log/ipaserver-install.log
+Monitor real-time IdM service logs:
+# Monitor Directory Server logs
+sudo tail -f /var/log/dirsrv/slapd-*/access
+
+# Monitor Kerberos logs
+sudo tail -f /var/log/krb5kdc.log
+
+# Monitor Apache logs
+sudo tail -f /var/log/httpd/error_log
+Search for specific error patterns:
+# Search for authentication failures
+sudo grep -i "authentication failed" /var/log/secure
+
+# Search for LDAP connection issues
+sudo grep -i "ldap" /var/log/messages
+
+# Search for certificate errors
+sudo grep -i "certificate" /var/log/httpd/error_log
+Subtask 1.4: Create a Log Analysis Script
+Create a script to automate log analysis:
+
+cat > ~/idm_log_analyzer.sh << 'EOF'
+#!/bin/bash
+
+echo "=== IdM Log Analysis Report ==="
+echo "Generated on: $(date)"
+echo
+
+echo "=== Recent Authentication Failures ==="
+sudo grep -i "authentication failed" /var/log/secure | tail -10
+echo
+
+echo "=== LDAP Connection Issues ==="
+sudo grep -i "ldap.*error\|ldap.*failed" /var/log/messages | tail -10
+echo
+
+echo "=== Certificate Warnings/Errors ==="
+sudo grep -i "certificate.*error\|certificate.*warning" /var/log/httpd/error_log | tail -10
+echo
+
+echo "=== Kerberos Issues ==="
+sudo grep -i "error\|failed" /var/log/krb5kdc.log | tail -10
+echo
+
+echo "=== Service Status ==="
+systemctl status ipa --no-pager
+EOF
+
+chmod +x ~/idm_log_analyzer.sh
+Run the log analysis script:
+~/idm_log_analyzer.sh
+Task 2: Troubleshoot Failed User Logins and Configuration Errors
+Subtask 2.1: Simulate and Diagnose User Login Issues
+Create a test user with intentional issues:
+# Create a user
+echo 'TempPassword123!' | kinit admin
+ipa user-add testuser --first=Test --last=User --password
+Simulate common login problems:
+# Disable the user account
+ipa user-disable testuser
+
+# Try to authenticate as the disabled user
+echo 'userpassword' | kinit testuser
+Check user account status:
+# Check user details
+ipa user-show testuser
+
+# Check if user is locked
+ipa user-status testuser
+Subtask 2.2: Troubleshoot Password Policy Issues
+Check current password policies:
+# View global password policy
+ipa pwpolicy-show
+
+# Check user-specific password policy
+ipa pwpolicy-show --user=testuser
+Create a script to diagnose password issues:
+cat > ~/password_troubleshoot.sh << 'EOF'
+#!/bin/bash
+
+USER=$1
+if [ -z "$USER" ]; then
+    echo "Usage: $0 <username>"
+    exit 1
+fi
+
+echo "=== Password Troubleshooting for $USER ==="
+echo
+
+echo "User Status:"
+ipa user-status $USER 2>/dev/null || echo "User not found or access denied"
+echo
+
+echo "Password Policy:"
+ipa pwpolicy-show --user=$USER 2>/dev/null || echo "Cannot retrieve password policy"
+echo
+
+echo "Recent Authentication Attempts:"
+sudo grep "$USER" /var/log/secure | tail -5
+EOF
+
+chmod +x ~/password_troubleshoot.sh
+Use the troubleshooting script:
+~/password_troubleshoot.sh testuser
+Subtask 2.3: Fix Configuration Errors
+Check and fix IdM service configuration:
+# Verify IPA configuration
+sudo ipa-server-install --unattended --setup-dns --auto-forwarders --dry-run
+
+# Check for configuration inconsistencies
+sudo ipa-replica-manage list-ruv
+Repair common configuration issues:
+# Re-enable the test user
+ipa user-enable testuser
+
+# Reset user password
+ipa passwd testuser
+
+# Unlock user account if locked
+ipa user-unlock testuser
+Task 3: Resolve Issues with DNS, Kerberos, and SSSD
+Subtask 3.1: Diagnose and Fix DNS Issues
+Test DNS resolution:
+# Test forward DNS resolution
+nslookup $(hostname)
+
+# Test reverse DNS resolution
+nslookup $(hostname -I | awk '{print $1}')
+
+# Test SRV records
+dig _ldap._tcp.$(dnsdomainname) SRV
+dig _kerberos._tcp.$(dnsdomainname) SRV
+Create a DNS diagnostic script:
+cat > ~/dns_diagnostics.sh << 'EOF'
+#!/bin/bash
+
+DOMAIN=$(dnsdomainname)
+HOSTNAME=$(hostname)
+IP=$(hostname -I | awk '{print $1}')
+
+echo "=== DNS Diagnostics for IdM ==="
+echo "Domain: $DOMAIN"
+echo "Hostname: $HOSTNAME"
+echo "IP Address: $IP"
+echo
+
+echo "=== Forward DNS Resolution ==="
+nslookup $HOSTNAME
+echo
+
+echo "=== Reverse DNS Resolution ==="
+nslookup $IP
+echo
+
+echo "=== SRV Records Check ==="
+echo "LDAP SRV:"
+dig _ldap._tcp.$DOMAIN SRV +short
+echo "Kerberos SRV:"
+dig _kerberos._tcp.$DOMAIN SRV +short
+echo "Kerberos UDP SRV:"
+dig _kerberos._udp.$DOMAIN SRV +short
+echo
+
+echo "=== DNS Server Status ==="
+systemctl status named-pkcs11 --no-pager
+EOF
+
+chmod +x ~/dns_diagnostics.sh
+Run DNS diagnostics:
+~/dns_diagnostics.sh
+Fix common DNS issues:
+# Restart DNS service
+sudo systemctl restart named-pkcs11
+
+# Check DNS configuration
+sudo named-checkconf
+
+# Verify zone files
+sudo named-checkzone $(dnsdomainname) /var/named/dynamic/$(dnsdomainname).db
+Subtask 3.2: Troubleshoot Kerberos Issues
+Check Kerberos configuration:
+# View Kerberos configuration
+cat /etc/krb5.conf
+
+# Check KDC status
+sudo systemctl status krb5kdc --no-pager
+Test Kerberos authentication:
+# Destroy existing tickets
+kdestroy
+
+# Test kinit with admin user
+echo 'admin_password' | kinit admin
+
+# List current tickets
+klist
+
+# Test service tickets
+kvno HTTP/$(hostname)
+Create Kerberos troubleshooting script:
+cat > ~/kerberos_troubleshoot.sh << 'EOF'
+#!/bin/bash
+
+echo "=== Kerberos Troubleshooting ==="
+echo
+
+echo "=== Current Kerberos Tickets ==="
+klist 2>/dev/null || echo "No current tickets"
+echo
+
+echo "=== Kerberos Configuration ==="
+echo "Default realm: $(grep default_realm /etc/krb5.conf | awk '{print $3}')"
+echo "KDC servers:"
+grep kdc /etc/krb5.conf | head -3
+echo
+
+echo "=== KDC Service Status ==="
+systemctl status krb5kdc --no-pager
+echo
+
+echo "=== Recent Kerberos Errors ==="
+sudo tail -10 /var/log/krb5kdc.log | grep -i error
+EOF
+
+chmod +x ~/kerberos_troubleshoot.sh
+Run Kerberos diagnostics:
+~/kerberos_troubleshoot.sh
+Subtask 3.3: Resolve SSSD Issues
+Check SSSD configuration and status:
+# Check SSSD configuration
+sudo cat /etc/sssd/sssd.conf
+
+# Check SSSD service status
+sudo systemctl status sssd --no-pager
+
+# Check SSSD domains
+sudo sssctl domain-list
+Test SSSD functionality:
+# Test user lookup
+getent passwd testuser
+
+# Test group lookup
+getent group ipausers
+
+# Check SSSD cache
+sudo sssctl user-checks testuser
+Create SSSD diagnostic script:
+cat > ~/sssd_diagnostics.sh << 'EOF'
+#!/bin/bash
+
+echo "=== SSSD Diagnostics ==="
+echo
+
+echo "=== SSSD Service Status ==="
+systemctl status sssd --no-pager
+echo
+
+echo "=== SSSD Domains ==="
+sudo sssctl domain-list
+echo
+
+echo "=== SSSD Configuration Summary ==="
+sudo grep -E "^\[|^domains|^services" /etc/sssd/sssd.conf
+echo
+
+echo "=== Test User Resolution ==="
+getent passwd admin 2>/dev/null || echo "Cannot resolve admin user"
+echo
+
+echo "=== SSSD Cache Status ==="
+sudo sssctl cache-expire --everything 2>/dev/null && echo "Cache cleared" || echo "Cache clear failed"
+echo
+
+echo "=== Recent SSSD Logs ==="
+sudo journalctl -u sssd --no-pager -n 10
+EOF
+
+chmod +x ~/sssd_diagnostics.sh
+Run SSSD diagnostics:
+~/sssd_diagnostics.sh
+Fix common SSSD issues:
+# Clear SSSD cache
+sudo sssctl cache-expire --everything
+
+# Restart SSSD service
+sudo systemctl restart sssd
+
+# Check SSSD logs for errors
+sudo journalctl -u sssd -f
+Subtask 3.4: Comprehensive System Health Check
+Create a comprehensive troubleshooting script:
+cat > ~/idm_comprehensive_check.sh << 'EOF'
+#!/bin/bash
+
+echo "=========================================="
+echo "    IdM Comprehensive Health Check"
+echo "=========================================="
+echo "Generated on: $(date)"
+echo
+
+# Function to check service status
+check_service() {
+    local service=$1
+    echo -n "Checking $service: "
+    if systemctl is-active $service >/dev/null 2>&1; then
+        echo "RUNNING"
+    else
+        echo "STOPPED/FAILED"
+        systemctl status $service --no-pager -l
+    fi
+}
+
+echo "=== Service Status Check ==="
+check_service ipa
+check_service named-pkcs11
+check_service krb5kdc
+check_service sssd
+check_service httpd
+check_service dirsrv@$(hostname -d | tr '.' '-' | tr '[:lower:]' '[:upper:]').service
+echo
+
+echo "=== Network Connectivity ==="
+echo -n "Hostname resolution: "
+nslookup $(hostname) >/dev/null 2>&1 && echo "OK" || echo "FAILED"
+echo -n "Reverse DNS: "
+nslookup $(hostname -I | awk '{print $1}') >/dev/null 2>&1 && echo "OK" || echo "FAILED"
+echo
+
+echo "=== Certificate Status ==="
+echo -n "HTTP certificate: "
+echo | openssl s_client -connect $(hostname):443 2>/dev/null | openssl x509 -noout -dates 2>/dev/null && echo "OK" || echo "FAILED"
+echo
+
+echo "=== Authentication Test ==="
+echo -n "Kerberos ticket: "
+klist >/dev/null 2>&1 && echo "VALID" || echo "NO TICKET"
+echo
+
+echo "=== Running ipa-healthcheck ==="
+sudo ipa-healthcheck --failures-only 2>/dev/null || echo "ipa-healthcheck not available or failed"
+echo
+
+echo "=========================================="
+echo "Health check completed"
+echo "=========================================="
+EOF
+
+chmod +x ~/idm_comprehensive_check.sh
+Run the comprehensive health check:
+~/idm_comprehensive_check.sh
+Troubleshooting Tips and Common Issues
+Common Authentication Issues
+Issue: Users cannot authenticate Solution:
+
+# Check if user exists and is enabled
+ipa user-show username
+ipa user-enable username
+
+# Check password policy
+ipa pwpolicy-show --user=username
+
+# Clear SSSD cache
+sudo sssctl cache-expire --everything
+Common DNS Issues
+Issue: DNS resolution fails Solution:
+
+# Check DNS service
+sudo systemctl restart named-pkcs11
+
+# Verify DNS configuration
+sudo named-checkconf
+
+# Test DNS resolution
+nslookup $(hostname)
+Common Kerberos Issues
+Issue: Kerberos authentication fails Solution:
+
+# Check time synchronization
+sudo chrony sources
+
+# Restart Kerberos services
+sudo systemctl restart krb5kdc
+
+# Test with kinit
+kdestroy && kinit admin
+Common SSSD Issues
+Issue: User lookup fails Solution:
+
+# Restart SSSD
+sudo systemctl restart sssd
+
+# Clear cache
+sudo sssctl cache-expire --everything
+
+# Check configuration
+sudo sssctl config-check
+Conclusion
+In this lab, you have learned essential troubleshooting skills for Identity Management systems. You have:
+
+Mastered diagnostic tools: Used ipa-healthcheck to identify system health issues and analyzed various log files to pinpoint problems
+Resolved authentication issues: Diagnosed and fixed user login problems, password policy issues, and account lockouts
+Fixed service problems: Troubleshot DNS resolution, Kerberos authentication, and SSSD functionality
+Developed systematic approaches: Created reusable scripts for ongoing monitoring and troubleshooting
+These skills are crucial for maintaining a healthy IdM environment in production systems. The systematic approach you've learned - using health checks, analyzing logs, and testing individual components - will help you quickly identify and resolve issues in real-world scenarios.
+
+Why This Matters: Identity Management is critical infrastructure for organizations. When IdM fails, users cannot access resources, applications break, and productivity suffers. The troubleshooting skills you've developed ensure you can maintain high availability and quickly restore service when issues occur.
+
+Remember to regularly run health checks, monitor logs proactively, and maintain documentation of common issues and their solutions for your specific environment.
